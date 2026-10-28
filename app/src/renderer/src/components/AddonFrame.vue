@@ -6,7 +6,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { connectAddonFrame } from '@/lib/addonFrame.ts'
 import { ADDON_SCHEME } from '@shared/addons.ts'
 
-const props = defineProps<{ addon: string; page: string; fit?: boolean }>()
+const props = defineProps<{ addon: string; page: string; fit?: boolean; width?: number }>()
 const emit = defineEmits<{ size: [height: number] }>()
 const frame = ref<HTMLIFrameElement | null>(null)
 const height = ref(0)
@@ -31,6 +31,9 @@ onBeforeUnmount(() => disconnect?.())
     :title="addon"
     sandbox="allow-scripts allow-same-origin"
     :class="['block w-full border-0 bg-transparent [color-scheme:dark]', fit ? '' : 'h-full']"
-    :style="fit ? { height: `${height}px` } : undefined"
+    :style="{
+      ...(fit ? { height: `${height}px` } : {}),
+      ...(props.width && Number.isFinite(props.width) ? { width: `${props.width}px` } : {}),
+    }"
   />
 </template>

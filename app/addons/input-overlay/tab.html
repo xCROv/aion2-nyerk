@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Input Overlay</title>
+  <link rel="stylesheet" href="/_nyerk/nyerk.css">
+  <style>
+    body { padding: 16px; }
+    main { max-width: 560px; margin: 0 auto; }
+    h1 { margin: 0 0 5px; font-size: 18px; }
+    p { margin: 0; }
+    .intro { margin-bottom: 16px; color: var(--text-darker); }
+    .notice { margin: 12px 0 16px; padding: 10px 12px; border: 1px solid #655323; border-radius: 8px; background: #211e14; color: #ffe29a; font-size: 12px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .status { min-height: 18px; margin-top: 10px; color: var(--text-darker); font-size: 12px; }
+    .filter-card { margin-top: 14px; padding: 12px; }
+    .filter-field { width: 100%; justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .filter-controls { display: flex; gap: 8px; margin-top: 8px; }
+    .filter-state { min-height: 18px; margin-top: 6px; color: var(--text-darker); font-size: 12px; }
+    .input-list { display: grid; gap: 7px; margin-top: 12px; }
+    .input-row { display: grid; grid-template-columns: minmax(80px, 1fr) auto auto auto auto; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 7px; }
+    .alias-group { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--border); border-radius: 7px; background: rgba(255, 255, 255, .025); }
+    .alias-group-title { font-weight: 650; }
+    .alias-group-inputs { display: grid; }
+    .input-row.grouped { grid-template-columns: minmax(80px, 1fr) auto auto auto; padding: 6px 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+    .input-row.grouped:first-child { border-top: 0; }
+    .timer-control { display: flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+    .timer-control input { margin: 0; }
+    .input-name { overflow-wrap: anywhere; }
+    .input-alias { color: var(--text-darker); font-size: 12px; }
+    .alias-editor { grid-column: 1 / -1; display: flex; gap: 6px; }
+    .alias-editor input { min-width: 0; flex: 1; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Input Overlay</h1>
+    <p class="intro">Show recent keyboard presses and mouse clicks over the game.</p>
+    <div class="notice"><strong>Input privacy:</strong> while this addon is on, it listens for keyboard and mouse buttons system-wide and displays their names on screen. This includes typing in other apps. Inputs are not saved or sent to the internet. Switch the addon off in Settings → Addons to stop listening.</div>
+    <section class="n-card" style="padding:12px">
+      <div class="n-heading">Overlay</div>
+      <p class="n-hint">The input display appears only while Aion is open and Nyerk's HUD is enabled. To move a detached display, open Nyerk's panel to enter HUD move mode, drag the dashed overlay, then choose Done.</p>
+      <div class="controls">
+        <button class="n-button primary" id="show">Show overlay</button>
+        <button class="n-button" id="hide">Hide overlay</button>
+        <button class="n-button" id="detach">Move separately</button>
+        <button class="n-button" id="dock">Dock in HUD</button>
+      </div>
+      <div class="status" id="status">Waiting for Nyerk…</div>
+    </section>
+    <section class="n-card filter-card">
+      <div class="n-heading">Input filter</div>
+      <p class="n-hint" style="margin-bottom:8px">Click the field to listen and add inputs. Click it again or click elsewhere to stop. Held keys and buttons are added once on press.</p>
+      <button class="n-input filter-field" id="filterCapture" type="button">Loading saved inputs…</button>
+      <div class="filter-controls">
+        <button class="n-button" id="clearFilter" type="button">Clear list</button>
+        <button class="n-button" id="allInputs" type="button">Allow all</button>
+      </div>
+      <div class="filter-state" id="filterState">Input capture is off.</div>
+      <div class="n-heading" style="margin-top:14px">Input aliases</div>
+      <p class="n-hint">Use Alias to change the displayed name for an input.</p>
+      <div class="input-list" id="inputList"></div>
+    </section>
+    <p class="n-hint" style="margin-top:14px">Text size, width, fade time, and input types are in Settings → Addons.</p>
+  </main>
+  <script src="/_nyerk/nyerk.js"></script>
+  <script src="tab.js"></script>
+</body>
+</html>

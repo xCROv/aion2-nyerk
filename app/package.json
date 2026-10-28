@@ -1,7 +1,7 @@
 {
   "name": "aion2-drop-tracker",
   "productName": "Nyerk",
-  "version": "0.2.39",
+  "version": "0.2.39b",
   "description": "In-game overlay for the Aion 2 drop tracker: pet souls and collection progress.",
   "private": true,
   "main": "./out/loader/index.js",

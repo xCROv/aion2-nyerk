@@ -1,0 +1,104 @@
+{
+  "id": "input-overlay",
+  "name": "Input Overlay",
+  "version": "1.0.0",
+  "author": "Codex",
+  "description": "Shows recent key presses and mouse clicks in a movable overlay. While enabled, it listens globally and displays key names locally; input is not stored or sent anywhere.",
+  "nyerk": "^1",
+  "sidecar": "capture.py",
+  "background": "background.js",
+  "tab": {
+    "label": "Inputs",
+    "page": "tab.html"
+  },
+  "hud": {
+    "page": "hud.html",
+    "widthSetting": "width",
+    "frameSetting": "showFrame"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "settings": [
+    {
+      "key": "captureKeys",
+      "type": "toggle",
+      "label": "Show keyboard presses",
+      "hint": "Listens for key presses while this addon is on.",
+      "default": true
+    },
+    {
+      "key": "captureMouse",
+      "type": "toggle",
+      "label": "Show mouse inputs",
+      "hint": "Listens for button presses and scroll wheel input.",
+      "default": true
+    },
+    {
+      "key": "hideWhenIdle",
+      "type": "toggle",
+      "label": "Hide when no input is held",
+      "hint": "Hide the overlay when no keyboard key or mouse button is held down.",
+      "default": false
+    },
+    {
+      "key": "hideIdlePrompt",
+      "type": "toggle",
+      "label": "Hide idle prompt",
+      "hint": "Hide the “Press a key or click to show input here” box when there are no recent inputs.",
+      "default": false
+    },
+    {
+      "key": "fontSize",
+      "type": "slider",
+      "label": "Text size",
+      "min": 12,
+      "max": 32,
+      "step": 1,
+      "default": 18
+    },
+    {
+      "key": "width",
+      "type": "slider",
+      "label": "Overlay width",
+      "min": 180,
+      "max": 1000,
+      "step": 20,
+      "default": 320
+    },
+    {
+      "key": "showFrame",
+      "type": "toggle",
+      "label": "Show HUD frame",
+      "hint": "Show Nyerk's outer background and border around this addon overlay.",
+      "default": false
+    },
+    {
+      "key": "transparency",
+      "type": "slider",
+      "label": "Overlay transparency",
+      "min": 0,
+      "max": 90,
+      "step": 5,
+      "default": 0
+    },
+    {
+      "key": "maxItems",
+      "type": "slider",
+      "label": "Recent inputs",
+      "min": 3,
+      "max": 12,
+      "step": 1,
+      "default": 8
+    },
+    {
+      "key": "lifetime",
+      "type": "slider",
+      "label": "Display time (ms)",
+      "min": 10,
+      "max": 5000,
+      "step": 10,
+      "default": 2200
+    }
+  ]
+}

@@ -15,6 +15,21 @@ const root = ref<HTMLElement | null>(null)
 const hud = computed(() => store.settings.hud)
 const info = computed(() => store.addons?.addons.find((a) => a.id === props.addon && a.state === 'on' && a.hud) ?? null)
 const frameKey = computed(() => `${props.addon}@${store.addons?.generation}`)
+const frameWidth = computed(() => {
+  const key = info.value?.hud?.widthSetting
+  const width = key ? Number(info.value?.values[key]) : 320
+  return Number.isFinite(width) ? Math.max(180, Math.min(2000, width)) : 320
+})
+const frameVisible = computed(() => {
+  const key = info.value?.hud?.frameSetting
+  return key ? info.value?.values[key] !== false : true
+})
+// Keep the frame visible as a drag target while the HUD is being arranged.
+const drawFrame = computed(() => frameVisible.value || store.hudEditing)
+const frameStyle = computed(() => ({
+  opacity: store.hudEditing ? 1 : hud.value.opacity,
+  width: `${frameWidth.value + (drawFrame.value ? 22 : 0)}px`,
+}))
 /** How tall its page is now: 0 while it has nothing to show. */
 const height = ref(0)
 watch(frameKey, () => (height.value = 0))
@@ -61,11 +76,12 @@ onBeforeUnmount(() => {
       <div
         v-if="info"
         :class="[
-          'm-1.5 w-80 rounded-lg border bg-darker/90 p-2.5 shadow-card',
-          store.hudEditing ? 'cursor-move border-dashed border-accent' : 'border-card',
+          'm-1.5 rounded-lg',
+          drawFrame ? 'border bg-darker/90 p-2.5 shadow-card' : 'border-0 bg-transparent p-0 shadow-none',
+          store.hudEditing ? 'cursor-move border-dashed border-accent' : drawFrame ? 'border-card' : 'border-transparent',
           empty && !store.hudEditing && 'invisible absolute',
         ]"
-        :style="{ opacity: store.hudEditing ? 1 : hud.opacity }"
+        :style="frameStyle"
         @pointerdown="store.hudEditing && drag.onPointerDown($event)"
       >
         <div v-if="store.hudEditing" class="mb-2 flex items-center justify-between gap-2 text-xs">
@@ -81,7 +97,7 @@ onBeforeUnmount(() => {
         </div>
         <p v-if="store.hudEditing && empty" class="text-xs text-darker">{{ info.name }} shows here when it has something to show.</p>
         <div class="pointer-events-none">
-          <AddonFrame :key="frameKey" :addon="addon" :page="info.hud!.page" fit @size="(h) => (height = h)" />
+          <AddonFrame :key="frameKey" :addon="addon" :page="info.hud!.page" :width="frameWidth" fit @size="(h) => (height = h)" />
         </div>
       </div>
     </div>

@@ -80,16 +80,34 @@ const petsShown = computed(() => !resting.value && (nearRows.value.length > 0 ||
 const addonSections = computed(() =>
   (store.addons?.addons ?? [])
     .filter((a) => a.state === 'on' && a.id && a.hud && a.hudShown && !a.hudDetached)
-    .map((a) => ({ addon: a.id!, page: a.hud!.page, key: `${a.id}@${store.addons?.generation}` })),
+    .map((a) => {
+      const widthKey = a.hud!.widthSetting
+      const widthValue = widthKey ? Number(a.values[widthKey]) : 320
+      const frameKey = a.hud!.frameSetting
+      return {
+        addon: a.id!,
+        page: a.hud!.page,
+        key: `${a.id}@${store.addons?.generation}`,
+        width: Number.isFinite(widthValue) ? Math.max(180, Math.min(2000, widthValue)) : 320,
+        showFrame: frameKey ? a.values[frameKey] !== false : true,
+      }
+    }),
 )
 const sectionHeights = reactive(new Map<string, number>())
 watch(addonSections, (list) => {
   for (const key of [...sectionHeights.keys()]) if (!list.some((s) => s.key === key)) sectionHeights.delete(key)
 })
-const addonsShown = computed(() => addonSections.value.some((s) => (sectionHeights.get(s.key) ?? 0) > 0))
-const empty = computed(() => !petsShown.value && !addonsShown.value)
 /** While it is being moved with no pets in it, it says where they would be. */
 const petsHint = computed(() => store.hudEditing && !nearRows.value.length && !rows.value.length)
+const hasAppHudContent = computed(() => petsShown.value || petsHint.value || store.hudEditing)
+const appCardStyle = computed(() => ({
+  opacity: store.hudEditing ? 1 : hud.value.opacity,
+  width: '320px',
+}))
+const addonCardStyle = (section: (typeof addonSections.value)[number]) => ({
+  opacity: store.hudEditing ? 1 : hud.value.opacity,
+  width: `${section.width + (section.showFrame || store.hudEditing ? 22 : 0)}px`,
+})
 
 const drag = windowDrag({ move: 'hud:moveTo', end: 'hud:dragEnd' })
 const done = (): void => void bridge().invoke('hud:setEditing', false)
@@ -134,16 +152,13 @@ onBeforeUnmount(() => {
 <template>
   <div class="inline-block">
     <div ref="root" class="inline-block" :style="{ zoom: hud.scale }">
-      <!-- Kept while an addon has a section, even with nothing to show: its frame has to be loaded
-           to say when it has something. Empty, it is invisible and out of the measured size. -->
       <div
-        v-if="!empty || store.hudEditing || addonSections.length"
+        v-if="hasAppHudContent"
         :class="[
-          'm-1.5 w-80 rounded-lg border bg-darker/90 p-2.5 shadow-card',
+          'm-1.5 rounded-lg border bg-darker/90 p-2.5 shadow-card',
           store.hudEditing ? 'cursor-move border-dashed border-accent' : 'border-card',
-          empty && !store.hudEditing && 'invisible absolute',
         ]"
-        :style="{ opacity: store.hudEditing ? 1 : hud.opacity }"
+        :style="appCardStyle"
         @pointerdown="store.hudEditing && drag.onPointerDown($event)"
       >
         <div v-if="store.hudEditing" class="mb-2 flex items-center justify-between gap-2 text-xs">
@@ -238,14 +253,22 @@ onBeforeUnmount(() => {
         </TransitionGroup>
         </template>
 
-        <!-- Each page draws itself, or nothing (height 0: laid out still, so it can say when it has
-             something); the mouse goes to the HUD, never to it. -->
-        <div
-          v-for="(s, i) in addonSections"
-          :key="s.key"
-          :class="['pointer-events-none', (sectionHeights.get(s.key) ?? 0) > 0 && (petsShown || petsHint || i > 0) && 'mt-2.5 border-t border-card pt-2.5']"
-        >
-          <AddonFrame :addon="s.addon" :page="s.page" fit @size="(h) => sectionHeights.set(s.key, h)" />
+      </div>
+      <!-- Each addon gets its own card so its frame setting never controls Nyerk's pet HUD card. -->
+      <div
+        v-for="s in addonSections"
+        :key="s.key"
+        :class="[
+          'm-1.5 rounded-lg',
+          s.showFrame || store.hudEditing ? 'border bg-darker/90 p-2.5 shadow-card' : 'border-0 bg-transparent p-0 shadow-none',
+          store.hudEditing ? 'cursor-move border-dashed border-accent' : s.showFrame ? 'border-card' : 'border-transparent',
+          (sectionHeights.get(s.key) ?? 0) === 0 && !store.hudEditing && 'invisible absolute',
+        ]"
+        :style="addonCardStyle(s)"
+        @pointerdown="store.hudEditing && drag.onPointerDown($event)"
+      >
+        <div class="pointer-events-none">
+          <AddonFrame :addon="s.addon" :page="s.page" :width="s.width" fit @size="(h) => sectionHeights.set(s.key, h)" />
         </div>
       </div>
     </div>

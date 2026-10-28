@@ -183,8 +183,11 @@ export interface AddonManifest {
   background: string | null
   /** `icon`: an .svg, the tab's face in the panel, drawn in the tab's colour (1.3). */
   tab: { label: string; page: string; icon: string | null } | null
-  /** A section of the HUD: a page drawn in the overlay, below the app's own, while it is shown. */
-  hud: { page: string } | null
+  /**
+   * A page drawn in the HUD. `widthSetting` names a slider controlling the outer frame width;
+   * `frameSetting` names a toggle that hides or shows the frame chrome.
+   */
+  hud: { page: string; widthSetting: string | null; frameSetting: string | null } | null
   permissions: AddonPermission[]
   /** Origins its web parts may connect to (`https://host[:port]`). */
   network: string[]
@@ -288,7 +291,11 @@ export function parseManifest(source: string, api: string = ADDON_API_VERSION, b
     const h = (typeof m['hud'] === 'object' && m['hud'] !== null ? m['hud'] : {}) as Record<string, unknown>
     const page = addonPath(h['page'], '.html')
     if (!page) return fail('its hud needs an .html page inside its folder')
-    hud = { page }
+    const widthSetting = h['widthSetting'] === undefined ? null : isSettingKey(h['widthSetting']) ? h['widthSetting'] : null
+    if (h['widthSetting'] !== undefined && !widthSetting) return fail("its HUD widthSetting must name one of its slider settings")
+    const frameSetting = h['frameSetting'] === undefined ? null : isSettingKey(h['frameSetting']) ? h['frameSetting'] : null
+    if (h['frameSetting'] !== undefined && !frameSetting) return fail("its HUD frameSetting must name one of its toggle settings")
+    hud = { page, widthSetting, frameSetting }
   }
   const builtin = m['builtin'] === true
   if (m['builtin'] !== undefined && !builtin) return fail('its builtin must be true when it is there')
@@ -317,6 +324,14 @@ export function parseManifest(source: string, api: string = ADDON_API_VERSION, b
     if (typeof def === 'string') return fail(def)
     if (settings.some((x) => x.key === def.key)) return fail(`setting ${def.key} is declared twice`)
     settings.push(def)
+  }
+  const widthSetting = hud?.widthSetting
+  if (widthSetting && !settings.some((s) => s.key === widthSetting && s.type === 'slider')) {
+    return fail(`its HUD widthSetting ${widthSetting} must name a slider setting`)
+  }
+  const frameSetting = hud?.frameSetting
+  if (frameSetting && !settings.some((s) => s.key === frameSetting && s.type === 'toggle')) {
+    return fail(`its HUD frameSetting ${frameSetting} must name a toggle setting`)
   }
 
   return {
@@ -364,7 +379,7 @@ export interface AddonInfo {
    * Its HUD section, if any; whether it is shown, and detached into a window of its own (its page
    * switches both: nyerk.hud.show, nyerk.hud.detach).
    */
-  hud: { page: string } | null
+  hud: { page: string; widthSetting: string | null; frameSetting: string | null } | null
   hudShown: boolean
   hudDetached: boolean
   /** Its background script, if any. */
