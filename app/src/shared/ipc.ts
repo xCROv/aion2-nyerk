@@ -6,12 +6,12 @@
 import type { AddonEvent, AddonMarkers, AddonsStatus } from './addons.ts'
 import type { KinaSession } from './kina.ts'
 import type { Point, SettingKey, Settings } from './settings.ts'
-import type { FieldBosses, TimerAlert, TimerId, TimersState } from './timers.ts'
+import type { AlarmSound, FieldBosses, TimerAlert, TimerId, TimersState } from './timers.ts'
 import type { Nearby, Pet, PvpKill, ShopStock, SoulToast, TrackerStatus } from './tracker.ts'
 import type { UpdateStatus } from './update.ts'
 
-/** What the map window shows: a pet's drop locations, or the collection's map. */
-export type MapView = { kind: 'pet'; pet: number } | { kind: 'collection' }
+/** What the map window shows: a pet's drop locations, or the collection's map (as a minimap: from the HUD). */
+export type MapView = { kind: 'pet'; pet: number } | { kind: 'collection'; minimap?: boolean }
 
 /** The Collection tab's search, sort and filter pills (stores/app.ts), for the map window's copy. */
 export interface CollectionView {
@@ -67,6 +67,8 @@ export interface InvokeChannels {
   'hud:moveTo': { args: [to: Point]; result: void }
   'hud:dragEnd': { args: []; result: void }
   'hud:resize': { args: [size: { width: number; height: number }]; result: void }
+  /** The pointer is over (or left) one of the HUD's buttons: it takes the mouse only while it is. */
+  'hud:hover': { args: [over: boolean]; result: void }
   /** An addon's detached HUD (windows.ts): moved, dropped (its place saved), sized to its content. */
   'addonHud:moveTo': { args: [id: string, to: Point]; result: void }
   'addonHud:dragEnd': { args: [id: string]; result: void }
@@ -84,11 +86,15 @@ export interface InvokeChannels {
   /** The timers alerting now; and dismissing them (a click on the bubble). */
   'timers:get': { args: []; result: TimerAlert[] }
   'timers:dismiss': { args: []; result: void }
+  /** The resets and next starts, with the region they follow (as `timers:state` sends them). */
+  'timers:state': { args: []; result: TimersState }
   /** The bubble was clicked during an alert: dismiss it and show its timer in the panel. */
   'timers:open': { args: []; result: void }
   /** Open the map window on a pet's drop locations, or on the collection's map. */
   'map:showPet': { args: [pet: number]; result: void }
   'map:showCollection': { args: []; result: void }
+  /** From the HUD: the collection's map straight as a minimap, where the minimap last was. */
+  'map:showMinimap': { args: []; result: void }
   /** The map window's page, as it loads: what to show, and the Collection tab's filters. */
   'map:get': { args: []; result: { view: MapView | null; collection: CollectionView | null } }
   'map:moveTo': { args: [to: Point]; result: void }
@@ -161,6 +167,8 @@ export interface EventChannels {
   'addons:event': AddonEvent
   /** An addon asked for attention: the bubble chimes and pulses. */
   'addons:notify': { addon: string }
+  /** An addon played one of the alert sounds (shared/timers.ts ALARM_SOUNDS): the bubble plays it. */
+  'addons:sound': { addon: string; sound: AlarmSound }
   /** The addons' markers on the Collection Map, whenever one of them changes. */
   'addons:markers': AddonMarkers[]
 }
@@ -183,13 +191,13 @@ export const INVOKE_CHANNELS: readonly InvokeChannel[] = [
   'tracker:get', 'tracker:setSouls', 'tracker:setName', 'tracker:restart', 'tracker:resetSession', 'tracker:clearPvp',
   'update:get', 'update:check', 'update:download', 'update:install',
   'bubble:moveTo', 'bubble:dragEnd', 'panel:toggle', 'panel:hide', 'panel:edges', 'panel:resize', 'panel:tab',
-  'hud:setEditing', 'hud:moveTo', 'hud:dragEnd', 'hud:resize', 'addonHud:moveTo', 'addonHud:dragEnd', 'addonHud:resize',
+  'hud:setEditing', 'hud:moveTo', 'hud:dragEnd', 'hud:resize', 'hud:hover', 'addonHud:moveTo', 'addonHud:dragEnd', 'addonHud:resize',
   'merchant:moveTo', 'merchant:dragEnd', 'merchant:resize', 'merchant:close',
   'killfeed:open', 'killfeed:close', 'killfeed:moveTo', 'killfeed:dragEnd', 'killfeed:resize', 'timers:get',
-  'map:showPet', 'map:showCollection', 'map:get', 'map:moveTo', 'map:dragEnd', 'map:close', 'map:minimap', 'collection:view', 'timers:dismiss', 'timers:open',
+  'map:showPet', 'map:showCollection', 'map:showMinimap', 'map:get', 'map:moveTo', 'map:dragEnd', 'map:close', 'map:minimap', 'collection:view', 'timers:dismiss', 'timers:open', 'timers:state',
   'addons:get', 'addons:openFolder', 'addons:reload', 'addons:setEnabled', 'addons:setSetting', 'addons:call', 'addons:markers',
 ]
 
 export const EVENT_CHANNELS: readonly EventChannel[] = [
-  'settings:changed', 'tracker:status', 'tracker:pets', 'tracker:pet', 'tracker:soul', 'tracker:nearby', 'tracker:combat', 'tracker:shop', 'tracker:kina', 'tracker:fieldBosses', 'tracker:pvp', 'tracker:pvpKill', 'map:show', 'map:collectionView', 'panel:showTab', 'panel:showTimers', 'timers:alert', 'timers:alerting', 'timers:state', 'hud:editing', 'panel:visible', 'panel:edges', 'update:status', 'addons:changed', 'addons:event', 'addons:notify', 'addons:markers',
+  'settings:changed', 'tracker:status', 'tracker:pets', 'tracker:pet', 'tracker:soul', 'tracker:nearby', 'tracker:combat', 'tracker:shop', 'tracker:kina', 'tracker:fieldBosses', 'tracker:pvp', 'tracker:pvpKill', 'map:show', 'map:collectionView', 'panel:showTab', 'panel:showTimers', 'timers:alert', 'timers:alerting', 'timers:state', 'hud:editing', 'panel:visible', 'panel:edges', 'update:status', 'addons:changed', 'addons:event', 'addons:notify', 'addons:sound', 'addons:markers',
 ]

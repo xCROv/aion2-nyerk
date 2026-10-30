@@ -79,6 +79,20 @@ from .track import STORE, Tracker, load
 
 # Nearby (monsters, your position) goes out at most this often, when it changed.
 NEARBY_EVERY_S = 0.25
+# Debug logging keeps this many recordings of the game connection, the newest.
+RECORDINGS_KEPT = 3
+
+
+def recording(folder: str | None) -> str | None:
+    """A new recording's path in `folder` (each capture gets its own), the oldest beyond
+    RECORDINGS_KEPT removed first. None without debug logging."""
+    if folder is None:
+        return None
+    where = Path(folder)
+    where.mkdir(parents=True, exist_ok=True)
+    for old in sorted(where.glob("stream-*.pcap"))[: -(RECORDINGS_KEPT - 1) or None]:
+        old.unlink(missing_ok=True)
+    return str(where / f"stream-{time.strftime('%Y%m%d-%H%M%S')}.pcap")
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -88,6 +102,8 @@ def main() -> None:
     ap.add_argument("--speed", type=float, default=1.0, help="replay speed, as a multiple of real time")
     ap.add_argument("--paused", action="store_true", help="start without capturing (the game is closed)")
     ap.add_argument("--addon", action="append", default=[], help="an addon's Python part, as <id>=<file.py>")
+    ap.add_argument("--debug-dir", help="debug logging: the stream's health every report, and the game "
+                                        "connection recorded to a .pcap in this folder")
     a = ap.parse_args()
 
     # UTF-8 both ways, whatever the environment: the packaged helper ignores the app's
@@ -142,7 +158,8 @@ def main() -> None:
             if a.replay:
                 capture.replay(a.replay, stream, speed=a.speed, stop=halt)
             else:
-                capture.live(stream, stop=halt, log=lambda m: print(m, file=sys.stderr))
+                capture.live(stream, stop=halt, log=lambda m: print(m, file=sys.stderr),
+                             debug=a.debug_dir is not None, record_to=recording(a.debug_dir))
             if not halt.is_set():
                 emit({"type": "status", "state": "stopped"})
         except Exception as e:  # noqa: BLE001 -- reported to the app, which shows it

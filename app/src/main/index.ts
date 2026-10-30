@@ -59,6 +59,7 @@ if (!app.requestSingleInstanceLock()) {
     settings.onChanged((all) => {
       broadcast('settings:changed', all)
       applyWindowSettings()
+      tracker.applyDebugLogging()
     })
     // A tab of the Black Cloud Merchant was opened: its pets worth buying, in their own window.
     tracker.onShop(() => showMerchant())

@@ -11,7 +11,7 @@ import {
   REGIONS,
   TIMERS,
   type AlarmSound,
-  type Region,
+  type RegionSetting,
   type TimerId,
 } from './timers.ts'
 import { isAddonId, isSettingKey } from './addons.ts'
@@ -83,6 +83,9 @@ export interface Settings {
    */
   mapStyles: { pets: Record<string, MarkStyle>; marks: Record<string, MarkStyle> }
 
+  /** The Collection Map opens following you (the crosshair on), until its crosshair turns that off. */
+  mapFollow: boolean
+
   /** The kill feed window (PvP Log → Open HUD): open, and where (null = top right). */
   killFeed: { open: boolean; position: Point | null }
 
@@ -99,8 +102,12 @@ export interface Settings {
 
   /** The Timers tab: which events alert, and how (a chime; the bubble shaking). */
   timers: {
-    /** The server region: weekly events are at its own local time. */
-    region: Region
+    /** The server region: weekly events are at its own local time. 'auto': the character's
+     *  server's (resolveRegion). */
+    region: RegionSetting
+    /** The region was chosen by hand: an older install's saved one (always NA East unless
+     *  changed) becomes 'auto' once, a choice made since is kept. */
+    regionChosen: boolean
     enabled: Record<TimerId, boolean>
     /** Minutes before each start to alert. */
     lead: Record<TimerId, number>
@@ -124,6 +131,12 @@ export interface Settings {
    * comes back when the game starts.
    */
   sleepWithoutGame: boolean
+
+  /**
+   * More in tracker.log for troubleshooting: the game stream's health every 30 s, and the game
+   * connection recorded to a .pcap in the logs folder (the newest 3 kept) for a player to send.
+   */
+  debugLogging: boolean
 
   tracker: {
     /** The Python interpreter; empty = the repo's .venv. */
@@ -181,13 +194,15 @@ export const SETTINGS_DEFAULTS: Settings = {
   mapWindow: { position: null, width: 900, height: 640, minimap: { width: 320, height: 320 } },
   killFeed: { open: false, position: null },
   mapStyles: { pets: {}, marks: {} },
+  mapFollow: true,
   hideFromCapture: false,
   faction: 'elyos',
   playerLevel: null,
   autoUpdateCheck: true,
   hideMaxed: true,
   timers: {
-    region: 'na-east',
+    region: 'auto',
+    regionChosen: false,
     enabled: Object.fromEntries(TIMERS.map((t) => [t.id, t.defaultOn])) as Record<TimerId, boolean>,
     lead: Object.fromEntries(TIMERS.map((t) => [t.id, t.lead])) as Record<TimerId, number>,
     sounds: Object.fromEntries(TIMERS.map((t) => [t.id, DEFAULT_SOUND])) as Record<TimerId, AlarmSound>,
@@ -198,6 +213,7 @@ export const SETTINGS_DEFAULTS: Settings = {
     shown: Object.fromEntries(TIMERS.map((t) => [t.id, defaultShown(t)])) as Record<TimerId, boolean>,
   },
   sleepWithoutGame: true,
+  debugLogging: false,
   tracker: { python: '', dataFile: '' },
   addons: { enabled: {}, values: {}, hud: {} },
 }
@@ -246,9 +262,11 @@ export function normalise<K extends SettingKey>(key: K, value: unknown): Setting
     }
     case 'panelOnTop':
     case 'hideFromCapture':
+    case 'mapFollow':
     case 'autoUpdateCheck':
     case 'hideMaxed':
     case 'sleepWithoutGame':
+    case 'debugLogging':
       return bool(value, d[key] as boolean) as Settings[K]
     case 'hud': {
       const v = (value ?? {}) as Partial<Settings['hud']>
@@ -276,7 +294,11 @@ export function normalise<K extends SettingKey>(key: K, value: unknown): Setting
       const lead = (v.lead ?? {}) as Partial<Record<TimerId, unknown>>
       const sounds = (v.sounds ?? {}) as Partial<Record<TimerId, unknown>>
       return {
-        region: REGIONS.some((r) => r.id === v.region) ? v.region : d.timers.region,
+        // A region older installs saved (before Automatic, always NA East unless changed) is
+        // dropped for 'auto' once; one picked by hand since (regionChosen) is kept.
+        region:
+          v.regionChosen === true && REGIONS.some((r) => r.id === v.region) ? (v.region as RegionSetting) : d.timers.region,
+        regionChosen: v.regionChosen === true && REGIONS.some((r) => r.id === v.region),
         enabled: Object.fromEntries(TIMERS.map((t) => [t.id, bool(on[t.id], t.defaultOn)])) as Record<TimerId, boolean>,
         // One of the leads offered for that timer; anything else falls back to its default.
         lead: Object.fromEntries(

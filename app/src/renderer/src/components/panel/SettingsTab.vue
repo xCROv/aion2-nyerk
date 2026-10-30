@@ -42,7 +42,7 @@ const updateText = computed(() => {
     case 'restarting':
       return `Restarting to install ${u.version}…`
     case 'error':
-      return `${u.error ?? 'The update failed (UNKNOWN).'} Show log, below, has the details.`
+      return `${u.error ?? 'The update failed (UNKNOWN).'} Show tracker.log, below, has the details.`
     default:
       return 'Not checked yet.'
   }
@@ -160,18 +160,6 @@ const savePython = (): Promise<void> => store.set('tracker', { ...store.settings
     <section>
       <h3 class="mb-1 text-xs font-semibold uppercase tracking-wide text-darkest">Tracker</h3>
       <div class="space-y-2 rounded-lg border border-card bg-card p-3 text-xs">
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-darker">Collection file</span>
-          <button
-            v-if="store.status?.dataFile"
-            type="button"
-            class="truncate text-accent hover:underline"
-            :title="store.status.dataFile"
-            @click="bridge().invoke('app:openPath', store.status.dataFile)"
-          >
-            Show in folder
-          </button>
-        </div>
         <label class="block">
           <span class="text-darker">Python</span>
           <input
@@ -181,6 +169,15 @@ const savePython = (): Promise<void> => store.set('tracker', { ...store.settings
             @change="savePython"
           />
         </label>
+        <div class="flex items-start justify-between gap-3 pt-1">
+          <div>
+            <div class="text-darker">Debug logging</div>
+            <div class="mt-0.5 text-darkest">
+              More in the log for troubleshooting, and the game connection recorded next to it (about 5 MB an hour). Turn it off when done.
+            </div>
+          </div>
+          <Toggle :model-value="store.settings.debugLogging" @update:model-value="store.set('debugLogging', $event)" />
+        </div>
         <div class="flex justify-end pt-1">
           <Button size="sm" @click="bridge().invoke('tracker:restart')">Restart tracker</Button>
         </div>
@@ -220,10 +217,18 @@ const savePython = (): Promise<void> => store.set('tracker', { ...store.settings
       </div>
     </section>
 
-    <section class="flex items-center justify-between text-xs text-darkest">
-      <span>Version {{ info?.version ?? '…' }}</span>
+    <section class="flex items-center justify-end text-xs text-darkest">
       <div class="flex gap-3">
-        <button v-if="info" type="button" class="hover:text-default" @click="bridge().invoke('app:openPath', info.logFile)">Show log</button>
+        <button v-if="info" type="button" class="hover:text-default" @click="bridge().invoke('app:openPath', info.logFile)">Show tracker.log</button>
+        <button
+          v-if="store.status?.dataFile"
+          type="button"
+          class="hover:text-default"
+          :title="store.status.dataFile"
+          @click="bridge().invoke('app:openPath', store.status.dataFile)"
+        >
+          Show collection.json
+        </button>
         <button v-if="info" type="button" class="hover:text-default" @click="bridge().invoke('app:openPath', info.settingsFile)">Settings file</button>
         <button type="button" class="text-red hover:underline" @click="bridge().invoke('app:quit')">Quit</button>
       </div>

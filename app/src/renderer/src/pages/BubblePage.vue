@@ -29,11 +29,14 @@ let offAlert: (() => void) | null = null
 const lastPlayed = new Map<string, number>()
 // An addon asking for attention: a chime (as the timers' sound and volume say) and a pulse.
 let offNotify: (() => void) | null = null
+// An addon playing a sound it picked (Nearby Nodes' per type): at the timers' volume.
+let offSound: (() => void) | null = null
 onMounted(() => {
   offNotify = bridge().on('addons:notify', () => {
     pulse.value++
     if (store.settings.timers.sound) playChime(store.settings.timers.volume, DEFAULT_SOUND)
   })
+  offSound = bridge().on('addons:sound', (s) => playChime(store.settings.timers.volume, s.sound))
   offAlert = bridge().on('timers:alert', (a) => {
     const cfg = store.settings.timers
     if (!cfg.sound) return
@@ -47,6 +50,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   offAlert?.()
   offNotify?.()
+  offSound?.()
 })
 const shaking = computed(() => store.alerting.length > 0 && store.settings.timers.shake)
 

@@ -18,7 +18,7 @@
  */
 import { compareVersions } from './bundle.ts'
 
-export const ADDON_API_VERSION = '1.4.0'
+export const ADDON_API_VERSION = '1.5.0'
 
 /**
  * Addons' pages load from `nyerk-addon://<id>/<path>`, and the SDK from the same origin, under
@@ -50,6 +50,7 @@ export const ADDON_PERMISSIONS = {
   'events:pvp': 'The PvP kill feed',
   'events:timers': 'Timers: their alerts, next starts and the resets',
   notify: 'Chime and shake the bubble',
+  sound: 'Play alert sounds',
   map: 'Put markers on the Collection Map',
   storage: 'Keep its own data',
 } as const

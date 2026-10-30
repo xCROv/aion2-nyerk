@@ -9,6 +9,9 @@
  *                            snapshot) are replayed to a listener added later. Returns an unsubscribe.
  *   nyerk.send(name, data)   to the addon's Python part (its on_message)
  *   nyerk.notify()           chime and pulse the bubble ('notify')
+ *   nyerk.sound(id)          play one of the alert sounds, nyerk.sounds ([{ id, label }]), at the
+ *                            timers' volume ('sound'; each once a second at most)
+ *   nyerk.serverName(id)     a game server's name (Kaisinel for 1104), or its id when not known
  *   nyerk.storage            get(key) / set(key, value) / all(): its own JSON ('storage')
  *   nyerk.settings           its declared settings' values, kept current
  *   nyerk.hud                its HUD section: shown and detached (null when it has none), show(on),
@@ -21,9 +24,13 @@
  * Every page also posts its height to the window holding it, which a HUD section is sized by.
  * Errors thrown in the page go to the app's log and the addon's card in Settings.
  */
+import { GAME_SERVERS } from '../shared/gameServers.ts'
+import { ALARM_SOUNDS } from '../shared/timers.ts'
 
 export const SDK_JS = String.raw`(() => {
   'use strict'
+  const SOUNDS = ${JSON.stringify(ALARM_SOUNDS)}
+  const SERVERS = ${JSON.stringify(GAME_SERVERS)}
   const pending = new Map()
   const listeners = new Map()
   const latest = new Map()
@@ -81,6 +88,9 @@ export const SDK_JS = String.raw`(() => {
     },
     send: (name, data) => call('send', name, data),
     notify: () => call('notify'),
+    sounds: SOUNDS.map((s) => ({ ...s })),
+    sound: (id) => call('sound', id),
+    serverName: (id) => SERVERS[id] ?? String(id),
     storage: {
       get: (key) => call('storage.get', key),
       set: (key, value) => call('storage.set', key, value),

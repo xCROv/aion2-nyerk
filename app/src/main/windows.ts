@@ -306,7 +306,8 @@ export function createHud(): BrowserWindow {
   if (alive(hud)) return hud
   const p = hudPosition()
   const win = overlayWindow({ x: p.x, y: p.y, width: 280, height: 120, focusable: false })
-  win.setIgnoreMouseEvents(true)
+  // Click-through, but the page still hears the pointer move: it asks for the mouse over its buttons.
+  win.setIgnoreMouseEvents(true, { forward: true })
   hud = win
   win.on('closed', () => (hud = null))
   win.webContents.once('did-finish-load', () => {
@@ -360,7 +361,7 @@ export function setHudEditing(editing: boolean, focus = true): void {
   // Edit mode is the only time the HUDs take the mouse: click-through the rest of the time.
   for (const win of [hud, ...addonHudWindows()]) {
     if (!alive(win)) continue
-    win.setIgnoreMouseEvents(!editing)
+    win.setIgnoreMouseEvents(!editing, { forward: win === hud })
     win.setFocusable(editing)
   }
   if (editing) {
@@ -369,6 +370,12 @@ export function setHudEditing(editing: boolean, focus = true): void {
   }
   broadcast('hud:editing', editing)
   refreshHud()
+}
+
+/** Over one of the HUD's buttons it takes the mouse (never the keyboard), so the button can be clicked. */
+export function setHudHover(over: boolean): void {
+  if (!alive(hud) || hudEditing) return
+  hud.setIgnoreMouseEvents(!over, { forward: true })
 }
 
 export function hudIsEditing(): boolean {
@@ -550,30 +557,46 @@ function mapBounds(): Rectangle {
   return clampToDisplay({ x: p.x, y: p.y, width, height })
 }
 
+/** The minimap where it was last: its top-right corner at the full window's (they line up there). */
+function minimapBounds(full: Rectangle): Rectangle {
+  const { width, height } = settings.get('mapWindow').minimap
+  return clampToDisplay({ x: full.x + full.width - width, y: full.y, width, height })
+}
+
 /**
  * Open the map window on a pet's drop locations or the collection's map (or show that in the one
  * already open). Opaque, unlike the overlays: it is large, and Windows gives an opaque frameless
- * window its rounded corners and resizable edges itself.
+ * window its rounded corners and resizable edges itself. Asked for as a minimap (the HUD's button),
+ * it opens as one and leaves the game the keyboard.
  */
 export function showMap(view: MapView): void {
   mapView = view
+  const minimap = view.kind === 'collection' && !!view.minimap
   if (alive(mapWin)) {
+    if (minimap) setMapMinimap(true)
     mapWin.webContents.send('map:show', view)
+    if (minimap) {
+      if (!mapWin.isVisible()) mapWin.showInactive()
+      return
+    }
     if (!mapWin.isVisible()) mapWin.show()
     mapWin.focus()
     return
   }
-  const bounds = mapBounds()
+  const full = mapBounds()
+  mapFull = { width: full.width, height: full.height }
+  const bounds = minimap ? minimapBounds(full) : full
   mapSize = { width: bounds.width, height: bounds.height }
-  mapMinimap = false
+  mapMinimap = minimap
+  const min = minimap ? MINIMAP_MIN : MAP_MIN
   const win = overlayWindow({
     ...bounds,
     transparent: false,
     backgroundColor: '#14121f',
     hasShadow: true,
     resizable: true,
-    minWidth: MAP_MIN.width,
-    minHeight: MAP_MIN.height,
+    minWidth: min.width,
+    minHeight: min.height,
   })
   mapWin = win
   win.on('closed', () => {
@@ -588,6 +611,7 @@ export function showMap(view: MapView): void {
     mapDragEnded()
   })
   win.once('ready-to-show', () => {
+    if (minimap) return win.showInactive()
     win.show()
     win.focus()
   })

@@ -108,7 +108,11 @@ onBeforeUnmount(() => {
     <header class="flex items-center gap-2.5 border-b border-card px-3 py-2.5">
       <img src="/icon.png" alt="" class="size-7" draggable="false" />
       <div class="min-w-0 flex-1">
-        <div class="text-sm font-semibold leading-tight">{{ DISPLAY_NAME }}</div>
+        <!-- The version beside the name, so a screenshot says which build it came from. -->
+        <div class="text-sm font-semibold leading-tight">
+          {{ DISPLAY_NAME }}
+          <span v-if="store.update.current" class="ml-1 text-xs font-normal text-darker">v{{ store.update.current }}</span>
+        </div>
         <div class="flex items-center gap-1.5 text-xs text-darker">
           <StatusDot :status="store.status" />
           <span class="truncate">{{ statusText(store.status) }}</span>

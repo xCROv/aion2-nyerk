@@ -9,10 +9,20 @@
  */
 import { broadcast } from './broadcast.ts'
 import { featureOn } from './builtins.ts'
+import { fieldBosses } from './fieldBosses.ts'
 import { game } from './game.ts'
+import { gameTimes } from './gameTimes.ts'
 import { settings } from './settings.ts'
 import { log, tracker } from './tracker.ts'
-import { alertingStart, TIMERS, timersState, type TimerAlert, type TimersState } from '../shared/timers.ts'
+import {
+  alertingStart,
+  resolveRegion,
+  TIMERS,
+  timersState,
+  type Region,
+  type TimerAlert,
+  type TimersState,
+} from '../shared/timers.ts'
 
 const CHECK_MS = 15_000
 
@@ -23,8 +33,10 @@ const key = (a: TimerAlert): string => `${a.id}@${a.at}`
 /** Alerts the app announced before an update restart: they show again without a second chime. */
 let announced = new Set<string>()
 let state: TimersState | null = null
+/** The setting's region, or with Automatic the last character's server's. */
+const region = (): Region => resolveRegion(settings.get('timers').region, fieldBosses.server())
 const currentState = (now: number): TimersState =>
-  timersState(now, settings.get('timers').region, featureOn('timers'), tracker.fieldBosses())
+  timersState(now, region(), featureOn('timers'), tracker.fieldBosses(), fieldBosses.server(), gameTimes.of(fieldBosses.server()))
 
 function check(): void {
   const now = Date.now()
@@ -42,7 +54,7 @@ function check(): void {
     for (const def of TIMERS) {
       // Only the timers listed in the Timers tab alert: a hidden one would ring unseen.
       if (!cfg.enabled[def.id] || !cfg.shown[def.id]) continue
-      const at = alertingStart(def, now, cfg.region, cfg.lead[def.id], tracker.fieldBosses())
+      const at = alertingStart(def, now, nextState.region, cfg.lead[def.id], tracker.fieldBosses(), nextState.game)
       if (at !== null && !done.has(`${def.id}@${at}`)) next.push({ id: def.id, at })
     }
   }

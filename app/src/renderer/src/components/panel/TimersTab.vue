@@ -19,7 +19,10 @@ import {
   leadChoices,
   nextStart,
   REGIONS,
+  resolveRegion,
+  serverLabel,
   TIMERS,
+  type RegionSetting,
   type AlarmSound,
   type TimerDef,
   type TimerId,
@@ -27,6 +30,12 @@ import {
 
 const store = useApp()
 const cfg = computed(() => store.settings.timers)
+/** The character's game server (main keeps the last one), and the region the times follow. */
+const server = computed(() => store.timersState?.server ?? store.status?.server ?? null)
+const region = computed(() => resolveRegion(cfg.value.region, server.value))
+/** The starts the game gave on this server (main's game times): the schedules follow them. */
+const game = computed(() => store.timersState?.game ?? {})
+const fromGame = (def: TimerDef): boolean => game.value[def.id] !== undefined
 
 const now = ref(Date.now())
 const ticker = setInterval(() => (now.value = Date.now()), 15_000)
@@ -57,7 +66,7 @@ function when(def: TimerDef): string {
   const starts: number[] = []
   let from = now.value
   for (let i = 0; i < s.days.length * s.times.length; i++) {
-    const n = nextStart(s, from, cfg.value.region)
+    const n = nextStart(s, from, region.value, {}, game.value[def.id])
     if (!Number.isFinite(n)) break
     starts.push(n)
     from = n + 1
@@ -90,7 +99,8 @@ const rows = computed(() =>
   TIMERS.filter((def) => shown(def.id) || alerting.value.has(def.id))
     .map((def) => {
       const next =
-        store.alerting.find((a) => a.id === def.id)?.at ?? nextStart(def.schedule, now.value, cfg.value.region, store.fieldBosses)
+        store.alerting.find((a) => a.id === def.id)?.at ??
+        nextStart(def.schedule, now.value, region.value, store.fieldBosses, game.value[def.id])
       const boss = bossNote(def)
       if (boss) return { def, next: boss.sort, at: boss.at, left: boss.left }
       const sameDay = new Date(next).toDateString() === new Date(now.value).toDateString()
@@ -164,7 +174,17 @@ function setSound(id: TimerId, sound: AlarmSound): void {
   playChime(cfg.value.volume, sound)
 }
 const SOUND_OPTIONS = ALARM_SOUNDS.map((s) => ({ value: s.id as AlarmSound, label: s.label }))
-const REGION_OPTIONS = REGIONS.map((r) => ({ value: r.id, label: `${r.label}${r.confirmed ? '' : ' (unconfirmed)'}` }))
+const regionLabel = (id: string): string => REGIONS.find((r) => r.id === id)?.label ?? id
+const REGION_OPTIONS = computed(() => [
+  { value: 'auto' as RegionSetting, label: server.value === null ? 'Automatic' : `Automatic (${regionLabel(region.value)})` },
+  ...REGIONS.map((r) => ({ value: r.id as RegionSetting, label: `${r.label}${r.confirmed ? '' : ' (unconfirmed)'}` })),
+])
+/** The region row's hint: whose server Automatic follows. */
+const regionHint = computed(() =>
+  server.value === null
+    ? "Weekly events (the siege) are at your region's own time. Automatic follows your character's server once you log in."
+    : `Weekly events (the siege) are at your region's own time. Your server: ${serverLabel(server.value)}.`,
+)
 const leadOptions = (def: TimerDef) => leadChoices(def).map((m) => ({ value: m, label: leadLabel(m) }))
 /** "at start", "5 min", "1 h": how early an alert comes. */
 const leadLabel = (m: number): string => (m === 0 ? 'at start' : m < 60 ? `${m} min` : `${m / 60} h`)
@@ -224,7 +244,7 @@ const shownCount = computed(() => TIMERS.filter((d) => shown(d.id)).length)
               </div>
               <!-- How long until it (the schedule itself is in the row's tooltip). -->
               <div :class="['truncate text-[11px] tabular-nums', alerting.has(r.def.id) ? 'text-yellow' : 'text-darker']">
-                <span v-if="!r.def.confirmed" class="text-yellow">unconfirmed · </span>{{ r.left }}{{ shared(r.def) ? ' · shared' : '' }}
+                <span v-if="!r.def.confirmed && !fromGame(r.def)" class="text-yellow">unconfirmed · </span>{{ r.left }}{{ shared(r.def) ? ' · shared' : '' }}{{ fromGame(r.def) ? ' · from the game' : '' }}
               </div>
             </div>
             <!-- When it starts, by the alert's switch; when on, how early and (behind the speaker) with
@@ -313,8 +333,12 @@ const shownCount = computed(() => TIMERS.filter((d) => shown(d.id)).length)
     <section>
       <h3 class="mb-1 text-xs font-semibold uppercase tracking-wide text-darkest">Alerts</h3>
       <div class="divide-y divide-[color:var(--gray-4)] rounded-lg border border-card bg-card px-3">
-        <SettingRow label="Server region" hint="Weekly events (the siege) are at your region's own time.">
-          <Select :model-value="cfg.region" :options="REGION_OPTIONS" @update:model-value="set({ region: $event })" />
+        <SettingRow label="Server region" :hint="regionHint">
+          <Select
+            :model-value="cfg.region"
+            :options="REGION_OPTIONS"
+            @update:model-value="set({ region: $event, regionChosen: $event !== 'auto' })"
+          />
         </SettingRow>
         <SettingRow label="Sound" hint="When an alert starts; each timer picks its own sound in its row.">
           <Toggle :model-value="cfg.sound" @update:model-value="set({ sound: $event })" />

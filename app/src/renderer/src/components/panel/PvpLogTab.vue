@@ -6,7 +6,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import Button from '@/components/Button.vue'
 import { bridge } from '@/lib/bridge.ts'
 import { useApp } from '@/stores/app.ts'
-import { serverTag } from '@shared/servers.ts'
+import { serverName, serverTag } from '@shared/servers.ts'
 import type { PvpKill } from '@shared/tracker.ts'
 
 const store = useApp()
@@ -124,7 +124,7 @@ const toggleHud = (): void => void bridge().invoke(hudOpen.value ? 'killfeed:clo
         v-for="t in tallies"
         :key="t.server"
         type="button"
-        :title="`Us ${t.us} kills on [${serverTag(t.server)}], [${serverTag(t.server)}] ${t.them} kills on us`"
+        :title="`Us ${t.us} kills on ${serverName(t.server)}, ${serverName(t.server)} ${t.them} kills on us`"
         :class="['flex items-center gap-1.5 rounded-md border px-2 py-1', enemy === t.server ? 'border-accent bg-accent/15' : 'border-card bg-card hover:border-light']"
         @click="pickEnemy(t.server)"
       >
@@ -141,12 +141,12 @@ const toggleHud = (): void => void bridge().invoke(hudOpen.value ? 'killfeed:clo
         <div class="min-w-0 flex-1">
           <div class="flex min-w-0 items-center gap-1.5">
             <span class="truncate font-medium" :class="k.mine && 'text-green'">{{ k.killer.name }}</span>
-            <span v-if="tag(k.killer.server)" class="shrink-0 text-[11px] text-yellow">[{{ tag(k.killer.server) }}]</span>
+            <span v-if="tag(k.killer.server)" class="shrink-0 text-[11px] text-yellow" :title="serverName(k.killer.server)">[{{ tag(k.killer.server) }}]</span>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0 text-darker" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
               <path d="M3 8h9M9 4.5 12.5 8 9 11.5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             <span class="truncate font-medium" :class="k.died && 'text-danger'">{{ k.victim?.name ?? 'a player out of view' }}</span>
-            <span v-if="k.victim && tag(k.victim.server)" class="shrink-0 text-[11px] text-yellow">[{{ tag(k.victim.server) }}]</span>
+            <span v-if="k.victim && tag(k.victim.server)" class="shrink-0 text-[11px] text-yellow" :title="serverName(k.victim.server!)">[{{ tag(k.victim.server) }}]</span>
           </div>
           <div v-if="k.killer.guild" class="truncate text-[11px] text-darker">{{ k.killer.guild }}</div>
         </div>

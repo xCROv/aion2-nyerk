@@ -91,6 +91,24 @@ const empty = computed(() => !petsShown.value && !addonsShown.value)
 /** While it is being moved with no pets in it, it says where they would be. */
 const petsHint = computed(() => store.hudEditing && !nearRows.value.length && !rows.value.length)
 
+/**
+ * The map button: the collection's map as a minimap, where it was last. The HUD is click-through,
+ * so it takes the mouse while the pointer is over the button (and gives it back when it leaves, or
+ * when the button goes away under it).
+ */
+const mapButtonShown = computed(() => petsShown.value || store.hudEditing)
+const overMapButton = ref(false)
+const hoverMapButton = (over: boolean): void => {
+  if (over === overMapButton.value) return
+  overMapButton.value = over
+  void bridge().invoke('hud:hover', over)
+}
+watch(mapButtonShown, (shown) => !shown && hoverMapButton(false))
+const openMinimap = (): void => {
+  hoverMapButton(false)
+  void bridge().invoke('map:showMinimap')
+}
+
 const drag = windowDrag({ move: 'hud:moveTo', end: 'hud:dragEnd' })
 const done = (): void => void bridge().invoke('hud:setEditing', false)
 const onKey = (e: KeyboardEvent): void => {
@@ -159,7 +177,7 @@ onBeforeUnmount(() => {
         </div>
 
         <template v-if="!resting || store.hudEditing">
-        <div v-if="nearRows.length || kinaText" class="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide">
+        <div v-if="nearRows.length || kinaText || mapButtonShown" class="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide">
           <template v-if="nearRows.length"><span class="size-1.5 rounded-full bg-green" /><span class="text-green">Nearby</span></template>
           <Sparkline
             v-if="kinaText && store.kinaTimeline.length"
@@ -168,6 +186,23 @@ onBeforeUnmount(() => {
             class="mx-1 h-3 min-w-0 flex-1 text-yellow opacity-80"
           />
           <span v-if="kinaText" class="ml-auto shrink-0 normal-case tabular-nums text-yellow" title="This session's Kina per hour">{{ kinaText }}</span>
+          <button
+            v-if="mapButtonShown"
+            type="button"
+            title="Collection map: the minimap, where it was last"
+            :class="[
+              'flex size-5 shrink-0 items-center justify-center rounded-md border border-light bg-default text-darker transition hover:border-accent hover:text-accent',
+              !kinaText && 'ml-auto',
+            ]"
+            @pointerenter="hoverMapButton(true)"
+            @pointerleave="hoverMapButton(false)"
+            @pointerdown.stop
+            @click="openMinimap"
+          >
+            <svg viewBox="0 0 16 16" class="size-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+              <path d="M1.5 3.5l4-1.5 5 1.5 4-1.5v10.5l-4 1.5-5-1.5-4 1.5z M5.5 2v10.5 M10.5 3.5V14" />
+            </svg>
+          </button>
         </div>
         <section v-if="nearRows.length">
           <div class="space-y-2">

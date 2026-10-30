@@ -210,9 +210,13 @@ class Game:
     def _merge(self, key: str, now: float) -> None:
         c = self._char(key)
         for part in ("tickets", "missions", "pvp", "duties", "benefits"):
-            if part in self.pending:
+            if part + "At" in self.pending:
                 c[part] = self.pending[part]
                 c[part + "At"] = self.pending[part + "At"]
+            elif part in self.pending:
+                # Changes with no list before them (Nyerk started mid-session): over what is kept.
+                c.setdefault(part, {}).update(self.pending[part])
+        c.setdefault("shops", {}).update(self.pending.get("shops", {}))
         c["completions"].extend(self.pending.get("completions", []))
         del c["completions"][:-KEEP_COMPLETIONS]
         self.pending = {}

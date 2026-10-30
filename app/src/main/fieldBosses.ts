@@ -71,6 +71,8 @@ function changed(): void {
 
 export const fieldBosses = {
   all: (): FieldBosses => bosses,
+  /** The last character's game server (kept across restarts), null until one has logged in. */
+  server: (): number | null => server,
 
   /** The character's game server: field bosses are per server, so another one starts afresh. */
   setServer(next: number | null): void {
@@ -86,7 +88,9 @@ export const fieldBosses = {
   fromMap(world: number, list: MapBoss[]): void {
     const seen = Date.now()
     bosses = { ...bosses, ...Object.fromEntries(list.map((b) => [b.id, { up: b.up, at: b.at, seen, source: 'map' as const }])) }
-    const g = bosses[101021]
+    // The Gartua of the list just read (Verteron's Eternal, Altgard's Immortal): a saved one from
+    // another zone read as this list's (2026-10-30: a respawn hours gone, in an Altgard log).
+    const g = list.find((b) => b.id === 101021 || b.id === 111021)
     log(
       `field bosses: zone ${world}, ${list.filter((b) => b.up).length}/${list.length} up` +
         (g ? `; Gartua ${g.up ? 'up' : `respawns ${new Date(g.at).toISOString().slice(0, 16).replace('T', ' ')} UTC`}` : ''),

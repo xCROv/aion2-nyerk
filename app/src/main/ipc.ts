@@ -35,6 +35,7 @@ import {
   resizeHud,
   resizeMerchant,
   setHudEditing,
+  setHudHover,
   setPanelTab,
   showTimersInPanel,
   togglePanel,
@@ -108,6 +109,7 @@ export function registerIpc(): void {
     if (isPoint(to)) moveHud(to)
   })
   handle('hud:dragEnd', () => hudDragEnded())
+  handle('hud:hover', (over) => setHudHover(Boolean(over)))
   handle('hud:resize', (size) => {
     if (isPoint({ x: size?.width, y: size?.height })) resizeHud(size)
   })
@@ -141,6 +143,7 @@ export function registerIpc(): void {
   })
   handle('timers:get', () => timers.alerting())
   handle('timers:dismiss', () => timers.dismiss())
+  handle('timers:state', () => timers.state())
   handle('timers:open', () => {
     const ids = timers.alerting().map((a) => a.id)
     timers.dismiss()
@@ -150,6 +153,7 @@ export function registerIpc(): void {
     if (Number.isInteger(pet)) showMap({ kind: 'pet', pet })
   })
   handle('map:showCollection', () => showMap({ kind: 'collection' }))
+  handle('map:showMinimap', () => showMap({ kind: 'collection', minimap: true }))
   handle('map:get', () => mapState())
   handle('map:moveTo', (to) => {
     if (isPoint(to)) moveMap(to)

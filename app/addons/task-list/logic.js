@@ -142,6 +142,21 @@
     return null
   }
 
+  /**
+   * A character's tickets: those kept (`kept`: { tickets, ticketsAt }) with what detect.py read
+   * this run (`read`, the same). A newer whole list replaces the kept one; a ticket read on its own
+   * since (a change, with its own `at`: Nyerk started mid-session, no list yet) takes its place.
+   */
+  function mergeTickets(kept, read) {
+    const whole = typeof read.ticketsAt === 'number' && read.ticketsAt >= (kept.ticketsAt ?? 0)
+    let tickets = whole ? read.tickets : kept.tickets
+    const ticketsAt = whole ? read.ticketsAt : kept.ticketsAt
+    for (const [id, t] of Object.entries(read.tickets ?? {})) {
+      if (typeof t.at === 'number' && t.at > (tickets?.[id]?.at ?? ticketsAt ?? 0)) tickets = { ...tickets, [id]: t }
+    }
+    return { tickets, ticketsAt }
+  }
+
   /** A Season Mission's progress: its count, the next goal, the steps done of all, and whether finished. */
   function missionProgress(mission, value) {
     const v = value || 0
@@ -207,7 +222,7 @@
 
   const api = {
     DAY, capOf, resetOf, usedOf, doneOf, setUsed, setDone, resetsBetween, bankNow, setValue, shown, scopeKey, isDone, duration,
-    lastReset, fromGame, missionProgress, pvpWeek, pvpBase, membershipEnd, memberOf,
+    lastReset, fromGame, mergeTickets, missionProgress, pvpWeek, pvpBase, membershipEnd, memberOf,
   }
   if (typeof module === 'object' && module.exports) module.exports = api
   else root.taskLogic = api

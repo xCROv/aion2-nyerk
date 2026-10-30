@@ -17,6 +17,8 @@ const close = (): void => void bridge().invoke('map:close')
 function show(view: MapView): void {
   // A pet's drop locations need the full window.
   if (view.kind === 'pet') store.setMapMinimap(false)
+  // The HUD's button opens the collection's map as a minimap (main has sized the window already).
+  else if (view.minimap) store.setMapMinimap(true)
   store.openCollectionMap(view.kind === 'collection')
   store.openPet(view.kind === 'pet' ? view.pet : null)
 }

@@ -77,6 +77,15 @@ const WORLDS = {
   220021: ['Floating Temple of Arkanis', 'asmodian-dungeons', 'Dungeon_D_0021', [-25500, -25500, 1, 1, 51000]],
   220022: ['Fire Temple', 'asmodian-dungeons', 'Dungeon_D_0022', [-28982.5, 697.5, 1, 1, 25500]],
 }
+/**
+ * Zones with no soul monsters whose map ships in maps/ by hand (not downloaded here), kept in
+ * spawns.json so addons can mark things on them. Goldrin's Treasure, the Shugo Festival's arena:
+ * interactivemap.app's tiles (their image g500041, stitched to 2048 px); sectors
+ * fitted to the spires in a capture.
+ */
+const LOCAL_WORLDS = {
+  500041: ["Goldrin's Treasure", 'events', 'Event_GoldrinsTreasure', [-29950, -65202, 1, 1, 102000]],
+}
 const IMAGE_WORLDS = new Set(['World_L_Starter', 'World_L_A', 'World_L_B', 'World_D_Starter', 'World_D_A', 'World_D_B', 'Abyss_Reshanta_A'])
 
 async function trpc(proc, input) {
@@ -221,6 +230,11 @@ for (const w of [...usedWorlds].sort((a, b) => a - b)) {
         bytes += await download(`${TILE_CDN}/${key}/Res/${key}_${xy}.webp`, join(OUT, key, `${xy}.webp`))
       }
   }
+}
+
+for (const [w, [name, group, key, sectors]] of Object.entries(LOCAL_WORLDS)) {
+  if (!existsSync(join(OUT, `${key}.webp`))) console.warn(`  ${key}.webp is missing (shipped by hand, not downloaded)`)
+  outWorlds[w] = { name, group, key, sectors, image: true }
 }
 
 const out = {

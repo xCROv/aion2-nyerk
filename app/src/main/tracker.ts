@@ -21,6 +21,7 @@ import { broadcast } from './broadcast.ts'
 import { settings } from './settings.ts'
 import { kinaBalance, kinaRebase, NO_KINA, type KinaSession } from '../shared/kina.ts'
 import { fieldBosses } from './fieldBosses.ts'
+import { gameTimes } from './gameTimes.ts'
 import { featureOn } from './builtins.ts'
 import { pvpLog } from './pvpLog.ts'
 import type { SessionCounts } from './restart.ts'
@@ -64,6 +65,8 @@ const statusListeners = new Set<(status: TrackerStatus) => void>()
 const shopListeners = new Set<(stock: ShopStock[]) => void>()
 /** Addons' Python parts: `--addon <id>=<file>` for each (main/addons.ts sets them). */
 let addonArgs: string[] = []
+/** Whether the helper running was started with debug logging. */
+let debugArgs = false
 const addonLineListeners = new Set<(ev: Record<string, unknown>) => void>()
 
 let status: TrackerStatus = {
@@ -104,8 +107,14 @@ function setStatus(patch: Partial<TrackerStatus>): void {
   if ((patch.state && patch.state !== status.state) || (patch.detail && patch.detail !== status.detail)) {
     log(`status: ${patch.state ?? status.state}${patch.detail ? ` (${patch.detail})` : ''}`)
   }
+  const wasActive = status.gameActive
   status = { ...status, ...patch }
   status.gameActive = status.lastPacketAgo !== null && status.lastPacketAgo < GAME_ACTIVE_S
+  // What the panel shows as "Tracking" / "Game connection idle", in the log too: when reading
+  // stopped, and whether it came back.
+  if (status.state === 'locked' && status.gameActive !== wasActive) {
+    log(status.gameActive ? 'game connection: reading' : `game connection idle: no game packet for ${GAME_ACTIVE_S}s`)
+  }
   broadcast('tracker:status', status)
   for (const fn of statusListeners) fn(status)
 }
@@ -183,6 +192,8 @@ export function startTracker(): void {
   if (replay) args.push('--replay', replay, '--speed', process.env['A2T_REPLAY_SPEED'] ?? '1')
   else if (!capturing) args.push('--paused')
   args.push(...addonArgs)
+  if (settings.get('debugLogging')) args.push('--debug-dir', dirname(logPath()))
+  debugArgs = settings.get('debugLogging')
 
   stderrTail = []
   setStatus({ state: 'starting', detail: null, dataFile: data, replay: Boolean(replay), lastPacketAgo: null })
@@ -327,6 +338,10 @@ function handleLine(line: string): void {
     case 'fieldBosses':
       fieldBosses.fromMap(ev['world'] as number, ev['bosses'] as { id: number; up: boolean; at: number }[])
       break
+    case 'gameTime':
+      // A start the game gave for a timer (the next reset, the next siege): the Timers follow it.
+      gameTimes.seen(fieldBosses.server(), ev['timer'] as string, ev['at'] as number)
+      break
     case 'pvpKill': {
       // The PvP Log addon switched off: no kills kept (those kept stay for when it is back on).
       if (!featureOn('pvp-log')) break
@@ -369,6 +384,10 @@ function handleLine(line: string): void {
       const position = ev['position'] as Nearby['position']
       // Stamped here, on change only: the helper resends the same position with every Nearby update.
       const moved = String(position) !== String(nearby.position) || ev['world'] !== nearby.world
+      // A zone entered (login, teleport, another server): proof in the log that the stream is read.
+      if (ev['world'] != null && ev['world'] !== nearby.world) {
+        log(`zone: ${ev['world']}${position ? ` at ${position.map(Math.round).join(', ')}` : ''}`)
+      }
       nearby = {
         world: ev['world'] as number | null,
         position,
@@ -491,6 +510,14 @@ export const tracker = {
     const sessions = await this.dumpSession()
     if (sessions && Object.keys(sessions).length) restoring = { sessions, world: nearby.world, position: nearby.position }
     if (child) this.restart()
+  },
+  /** Settings → Debug logging switched: the helper restarted with it (or without), the session kept. */
+  applyDebugLogging(): void {
+    const on = settings.get('debugLogging')
+    if (!child || on === debugArgs) return
+    debugArgs = on
+    log(`debug logging ${on ? 'on' : 'off'}: restarting the tracker`)
+    void this.restartKeepingSession()
   },
   /** The addons' Python parts the next start loads. */
   setAddonArgs(args: string[]): void {

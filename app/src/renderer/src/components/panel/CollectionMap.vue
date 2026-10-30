@@ -50,17 +50,23 @@ const placed = computed(() => {
   return out
 })
 
-/** The zones the listed pets spawn in: yours first, then by how many of them spawn there. */
+/**
+ * The zones the listed pets spawn in: yours first, then by how many of them spawn there. A zone
+ * with a map and no pets is listed too while you are in it or an addon marks something there (the
+ * Shugo Festival's chests).
+ */
 const zones = computed(() => {
   const counts = new Map<number, number>()
   for (const byWorld of placed.value.values()) for (const w of byWorld.keys()) counts.set(w, (counts.get(w) ?? 0) + 1)
+  for (const a of addonMarkers.value) for (const m of a.markers) if (!counts.has(m.world)) counts.set(m.world, 0)
+  if (here.value && !counts.has(here.value.world)) counts.set(here.value.world, 0)
   return [...counts.entries()]
     .map(([id, pets]) => ({ id, pets, name: spawns.value?.worlds[id]?.name ?? `#${id}`, yours: id === here.value?.world }))
     .filter((z) => spawns.value?.worlds[z.id])
     .sort((a, b) => Number(b.yours) - Number(a.yours) || b.pets - a.pets || a.name.localeCompare(b.name))
 })
 const zoneOptions = computed(() =>
-  zones.value.map((z) => ({ value: z.id, label: `${z.name} (${z.pets})${z.yours ? ' · you are here' : ''}` })),
+  zones.value.map((z) => ({ value: z.id, label: `${z.name}${z.pets ? ` (${z.pets})` : ''}${z.yours ? ' · you are here' : ''}` })),
 )
 const worldId = ref<number | null>(null)
 watch(
@@ -83,8 +89,15 @@ const worldName = (id: number): string => spawns.value?.worlds[id]?.name ?? `#${
 
 /** You, on this map, when you are in this zone and the tracker knows where. */
 const you = computed<[number, number] | null>(() => (here.value && here.value.world === worldId.value ? here.value.at : null))
-/** The map follows you (in the full window and the minimap alike), until it is dragged. */
-const follow = ref(false)
+/**
+ * The map follows you (in the full window and the minimap alike), until it is dragged. It opens
+ * following, at the zoom it opens at, unless the crosshair was last clicked off (kept in settings).
+ */
+const follow = ref(store.settings.mapFollow)
+function toggleFollow(): void {
+  follow.value = !follow.value
+  void store.set('mapFollow', follow.value)
+}
 
 interface Row {
   pet: Pet
@@ -236,7 +249,7 @@ const progress = (pet: Pet): string => {
       ]"
       @pointerdown.stop
       @dblclick.stop
-      @click="follow = !follow"
+      @click="toggleFollow"
     >
       <svg viewBox="0 0 16 16" class="size-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
         <circle cx="8" cy="8" r="4.5" />
@@ -385,7 +398,7 @@ const progress = (pet: Pet): string => {
             ]"
             @pointerdown.stop
             @dblclick.stop
-            @click="follow = !follow"
+            @click="toggleFollow"
           >
             <svg viewBox="0 0 16 16" class="size-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
               <circle cx="8" cy="8" r="4.5" />

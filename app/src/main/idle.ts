@@ -14,6 +14,7 @@
  * Settings → "Sleep while Aion 2 is closed" turns this off; a replay (A2T_REPLAY) never sleeps.
  */
 import { game } from './game.ts'
+import { logNetworkSoftware } from './netcheck.ts'
 import { settings } from './settings.ts'
 import { log, startTracker, stopTracker, tracker } from './tracker.ts'
 import { closeOverlays, createBubble, createHud, createKillFeed, onPanelVisible, panelVisible } from './windows.ts'
@@ -42,6 +43,7 @@ function wake(why: string): void {
   if (asleep === false) return
   asleep = false
   log(`awake: ${why}`)
+  void logNetworkSoftware(log)
   createBubble()
   createKillFeed()
   createHud()

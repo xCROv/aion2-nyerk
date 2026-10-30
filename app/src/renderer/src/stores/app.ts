@@ -7,7 +7,7 @@ import { computed, reactive, ref, toRaw } from 'vue'
 import { SETTINGS_DEFAULTS, type SettingKey, type Settings } from '@shared/settings.ts'
 import { MAX_LEVEL, NO_NEARBY, type Nearby, type Pet, type PvpKill, type ShopStock, type SoulToast, type TrackerStatus } from '@shared/tracker.ts'
 import { kinaPerHour, kinaSeries, NO_KINA, type KinaSession } from '@shared/kina.ts'
-import type { FieldBosses, TimerAlert, TimerId } from '@shared/timers.ts'
+import type { FieldBosses, TimerAlert, TimerId, TimersState } from '@shared/timers.ts'
 import { initialUpdateStatus, type UpdateStatus } from '@shared/update.ts'
 import type { AddonsStatus } from '@shared/addons.ts'
 import type { CollectionView } from '@shared/ipc.ts'
@@ -28,6 +28,8 @@ export const useApp = defineStore('app', () => {
   const nearby = ref<Nearby>(NO_NEARBY)
   /** The timers alerting now (the bubble shakes while there are any). */
   const alerting = ref<TimerAlert[]>([])
+  /** The resets and next starts, and the region they follow (the character's server's with Automatic). */
+  const timersState = ref<TimersState | null>(null)
   /** The field bosses as the map last listed them (the Gartua timer). */
   const fieldBosses = ref<FieldBosses>({})
   /** The PvP kill feed (main keeps it for the session). */
@@ -141,6 +143,7 @@ export const useApp = defineStore('app', () => {
       now.value = Date.now()
     })
     api.on('timers:alerting', (a) => (alerting.value = a))
+    api.on('timers:state', (t) => (timersState.value = t))
     api.on('update:status', (u) => (update.value = u))
     api.on('hud:editing', (e) => (hudEditing.value = e))
     api.on('panel:visible', (v) => (panelVisible.value = v))
@@ -155,6 +158,7 @@ export const useApp = defineStore('app', () => {
     fieldBosses.value = t.fieldBosses
     pvp.value = t.pvp
     alerting.value = await api.invoke('timers:get')
+    timersState.value = await api.invoke('timers:state')
     update.value = await api.invoke('update:get')
     addons.value = await api.invoke('addons:get')
     ready.value = true
@@ -208,7 +212,7 @@ export const useApp = defineStore('app', () => {
   }
 
   return {
-    settings, status, pets, toasts, fighting, collectionView, shop, kina, kinaRate, kinaTimeline, alerting, timerFocus, fieldBosses, pvp, hudEditing, panelVisible, ready, sessionSouls, recentPets, openPetId, collectionMapOpen, mapMinimap, nearby, update, addons,
+    settings, status, pets, toasts, fighting, collectionView, shop, kina, kinaRate, kinaTimeline, alerting, timersState, timerFocus, fieldBosses, pvp, hudEditing, panelVisible, ready, sessionSouls, recentPets, openPetId, collectionMapOpen, mapMinimap, nearby, update, addons,
     init, set, setHud, togglePin, openPet, openCollectionMap, setMapMinimap, showPetMap, showCollectionMap, applyCollectionView, hiddenPet,
   }
 })

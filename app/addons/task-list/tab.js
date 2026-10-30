@@ -13,7 +13,7 @@
 // tab, out of the tab's count, until its eye brings it back (kept for every character).
 'use strict'
 
-const { TASKS, FOLDED_GROUPS, SERVER_TAGS } = window.tasks
+const { TASKS, FOLDED_GROUPS } = window.tasks
 const { MISSIONS, THEMES } = window.season
 const L = window.taskLogic
 
@@ -57,7 +57,7 @@ function el(tag, attrs = {}, ...children) {
 }
 
 const charKey = (c) => `${c.server}:${c.name}`
-const serverName = (server) => SERVER_TAGS[server] ?? String(server)
+const serverName = (server) => nyerk.serverName(server)
 const time = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 const picked = () => chars[view.char] ?? null
 
@@ -92,7 +92,7 @@ const entryNow = (task, c, member, now) => detected(task, c, member, now)?.entry
 
 /** When a character's game data for a task was read: the part the task takes its count from. */
 const readAt = (task, g) =>
-  task.game?.duties ? g.dutiesAt : task.game?.shop !== undefined ? g.shops?.[String(task.game.shop)]?.at : task.game?.season ? g.missionsAt : g.ticketsAt
+  task.game?.duties ? g.dutiesAt : task.game?.shop !== undefined ? g.shops?.[String(task.game.shop)]?.at : task.game?.season ? g.missionsAt : g.tickets?.[String(task.game?.ticket ?? task.game?.hours)]?.at ?? g.ticketsAt
 
 /** The game's data for a task: the character's, or for a limit its server shares, the server's latest read. */
 function gameFor(task, c) {
@@ -616,13 +616,16 @@ function seeGame(state) {
   for (const [key, g] of Object.entries(state?.chars ?? {})) {
     const kept = game[key] ?? {}
     const next = { ...kept, name: g.name ?? kept.name, server: g.server ?? kept.server }
-    for (const part of ['tickets', 'missions', 'pvp', 'duties', 'benefits']) {
+    for (const part of ['missions', 'pvp', 'duties', 'benefits']) {
       const at = g[`${part}At`]
       if (g[part] && typeof at === 'number' && at >= (kept[`${part}At`] ?? 0)) {
         next[part] = g[part]
         next[`${part}At`] = at
       }
     }
+    // Tickets: a newer whole list, and each ticket changed since on its own.
+    const t = L.mergeTickets(kept, g)
+    if (t.tickets) Object.assign(next, t.ticketsAt === undefined ? { tickets: t.tickets } : t)
     // Shops: each one as last read (opened or bought from), the newer read kept.
     for (const [shop, read] of Object.entries(g.shops ?? {})) {
       if ((read.at ?? 0) >= (kept.shops?.[shop]?.at ?? 0)) next.shops = { ...(next.shops ?? kept.shops ?? {}), [shop]: read }

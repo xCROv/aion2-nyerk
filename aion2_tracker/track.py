@@ -68,9 +68,32 @@ GONE_SILENT_S = 15.0
 
 def load(path: Path = STORE) -> dict:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {"pets": {}}
+    drop_non_pets(data)
+    return data
+
+
+def drop_non_pets(data: dict) -> int:
+    """Take out entries whose id is not a pet's (P.PET_IDS), from the collection and each saved
+    character's, and characters whose server is not one: what misread records left before these
+    were checked. How many went."""
+    dropped = 0
+    for pets in [data.get("pets", {})] + [c.get("pets", {}) for c in data.get("characters", {}).values()]:
+        for pid in [k for k in pets if not (k.isdigit() and P.is_pet_id(int(k)))]:
+            del pets[pid]
+            dropped += 1
+    if dropped:
+        print(f"collection: dropped {dropped} entries that are not pets (misread ids)", file=sys.stderr)
+    # And characters on a server that is not one (misread, as "M4" on 12595): their pets are votes
+    # copied from the real ones', which those still have.
+    chars = data.get("characters", {})
+    for name in [n for n, c in chars.items()
+                 if n != data.get("current") and c.get("server") is not None and not P.is_server_id(c["server"])]:
+        print(f"collection: dropped character {name} (server {chars.pop(name)['server']}, not one)", file=sys.stderr)
+        dropped += 1
+    return dropped
 
 
 def save(data: dict, path: Path = STORE) -> None:
@@ -197,6 +220,8 @@ class Tracker:
         self.before_sync: tuple[float, dict, P.Collection] | None = None
         # The map's field boss list, as last passed on: it comes every 3 s, unchanged mostly.
         self.field_bosses: tuple | None = None
+        # The times the game gave for its schedules, as last passed on (timer id -> ms).
+        self.game_times: dict[str, int] = {}
         # The kill feed: the players in view (entity -> Player), your own entity in this zone (from
         # your zone entry record), and the player kills passed on lately (each is sent once).
         self.players: dict[int, P.Player] = {}
@@ -311,8 +336,25 @@ class Tracker:
             # (the app knows which items are pets, and which pets are worth buying).
             self.on_event({"type": "shop", "ts": ts, "tab": shop.tab, "nextAt": shop.next_at_ms,
                            "items": [vars(i) for i in shop.items]})
+        elif (reset := P.parse_next_reset(pkt)) is not None:
+            self._game_time(ts, "dailyReset", reset)
+        elif (limits := P.parse_limits(pkt)) is not None:
+            if (weekly := P.weekly_reset(limits, ts * 1000)) is not None:
+                self._game_time(ts, "weeklyReset", weekly)
+        elif siege := P.parse_siege(pkt):
+            self._game_time(ts, "siege", siege.next_ms)
         if coll := P.parse_collection(pkt):
             self._sync(ts, coll)
+        elif P.opcode(pkt) == P.OP_COLLECTION:
+            # Not a collection we can read, or not one at all: no sync, and the record to learn from.
+            print(f"collection not read ({len(pkt)} bytes): {pkt[:64].hex(' ')}", file=sys.stderr)
+
+    def _game_time(self, ts: float, timer: str, at: int) -> None:
+        """A start the game gave for one of the app's timers (shared/timers.ts ids), passed on once
+        per new time: the app moves that timer's schedule onto it."""
+        if self.game_times.get(timer) != at:
+            self.game_times[timer] = at
+            self.on_event({"type": "gameTime", "ts": ts, "timer": timer, "at": at})
 
     def _hear(self, ts: float, pkt: bytes) -> None:
         """A record naming a monster in view (its entity first) says it is still there; once a

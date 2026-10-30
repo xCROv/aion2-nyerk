@@ -41,6 +41,7 @@ import {
   type FoundFolder,
 } from '../shared/addons.ts'
 import type { EventChannel } from '../shared/ipc.ts'
+import { isAlarmSound } from '../shared/timers.ts'
 import { SDK_CSS, SDK_JS } from './addonSdk.ts'
 import { broadcast, tapBroadcast } from './broadcast.ts'
 import { settings } from './settings.ts'
@@ -54,6 +55,8 @@ const WATCH_SETTLE_MS = 1000
 const MAX_STORAGE_BYTES = 1024 * 1024
 /** One chime per addon at most this often. */
 const NOTIFY_EVERY_MS = 3000
+/** Each sound once per addon at most this often (a zone's nodes come in together). */
+const SOUND_EVERY_MS = 1000
 
 let list: AddonInfo[] = []
 let changed = false
@@ -66,6 +69,8 @@ const errors = new Map<string, string>()
 const emitted = new Map<string, Map<string, unknown>>()
 const storage = new Map<string, Record<string, unknown>>()
 const lastNotify = new Map<string, number>()
+/** When each addon last played each sound: `<id>/<sound>`. */
+const lastSound = new Map<string, number>()
 /** Each addon's markers on the Collection Map: its latest list, until it is switched off or reloaded. */
 const markers = new Map<string, AddonMapMarker[]>()
 
@@ -391,6 +396,17 @@ function call(id: string, method: string, args: unknown[]): unknown {
       if (now - (lastNotify.get(id) ?? 0) >= NOTIFY_EVERY_MS) {
         lastNotify.set(id, now)
         broadcast('addons:notify', { addon: id })
+      }
+      return null
+    }
+    case 'sound': {
+      need(addon, 'sound')
+      const sound = args[0]
+      if (!isAlarmSound(sound)) throw new Error(`unknown sound ${String(sound)}`)
+      const now = Date.now()
+      if (now - (lastSound.get(`${id}/${sound}`) ?? 0) >= SOUND_EVERY_MS) {
+        lastSound.set(`${id}/${sound}`, now)
+        broadcast('addons:sound', { addon: id, sound })
       }
       return null
     }

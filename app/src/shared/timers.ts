@@ -21,11 +21,18 @@
  * - Siege Bosses: 30 minutes into each siege (Thursday 21:30 New York).
  * - Guardian Lord Nahma: Friday and Sunday at 21:00 server time (allthings.how, metabot.gg; the
  *   timer showed Friday 21:00 New York, and so did the game's map on 2026-10-23).
- * - Watcher Kaira: every 4 hours from 01:00 server time, since the 2026-09-02 patch (The Games
- *   Wiki; older guides say every 3 hours). The timer showed 01:00 New York, which either fits.
- * - Daily reset at 03:00 New York (07:00 UTC), weekly reset on Wednesday at the same time. That
- *   they follow New York's daylight saving, as the siege does, is assumed.
+ * - Watcher Kaira: every 3 hours from 02:00 UTC, as the older guides say (not every 4 hours, as
+ *   The Games Wiki has it since the 2026-09-02 patch): three readings of the map agree.
+ * - Daily reset at 07:00 UTC, weekly reset on Wednesday at the same time, in every region (16:00
+ *   UTC+9, no daylight saving). Confirmed 2026-10-29: the game's next-reset packet (`23 e2`) says
+ *   07:00 UTC, and the times it sends for after 1 Nov (a monthly limit's reset, item expiries) are
+ *   07:00 UTC too, not 08:00; a player in Europe reports 08:00 CET. Before then they were 03:00 in
+ *   the region's time zone, five hours early in Europe and an hour late in NA East in winter.
+ *
+ * The region is the character's game server's by default (its id's second digit, REGIONS).
  */
+
+import { GAME_SERVERS } from './gameServers.ts'
 
 export type TimerId =
   | 'shugo'
@@ -67,14 +74,40 @@ export type FieldBosses = Record<number, FieldBossState>
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
 const hm = (h: number, m = 0): number => h * 60 + m
 
-/** The global servers' regions, and the time zone each one's "server time" is. */
-export type Region = 'na-east' | 'na-west' | 'europe'
-export const REGIONS: { id: Region; label: string; zone: string; confirmed: boolean }[] = [
-  { id: 'na-east', label: 'NA East', zone: 'America/New_York', confirmed: true },
-  { id: 'na-west', label: 'NA West', zone: 'America/Los_Angeles', confirmed: false },
-  { id: 'europe', label: 'Europe', zone: 'Europe/Berlin', confirmed: false },
+/** The global servers' regions, and the time zone each one's "server time" is. `digit` is the
+ *  region's in a game server id (Kaisinel NA East 1104: 1). Latin America's and Asia's zones are
+ *  guesses until a player there checks the siege. */
+export type Region = 'na-east' | 'na-west' | 'europe' | 'latam' | 'asia'
+export const REGIONS: { id: Region; label: string; zone: string; confirmed: boolean; digit: number }[] = [
+  { id: 'na-east', label: 'NA East', zone: 'America/New_York', confirmed: true, digit: 1 },
+  { id: 'na-west', label: 'NA West', zone: 'America/Los_Angeles', confirmed: false, digit: 2 },
+  { id: 'europe', label: 'Europe', zone: 'Europe/Berlin', confirmed: false, digit: 3 },
+  { id: 'latam', label: 'Latin America', zone: 'America/Sao_Paulo', confirmed: false, digit: 4 },
+  { id: 'asia', label: 'Asia', zone: 'Asia/Singapore', confirmed: false, digit: 5 },
 ]
 const zoneOf = (region: Region): string => REGIONS.find((r) => r.id === region)?.zone ?? 'America/New_York'
+
+/** The Timers tab's region setting: one region, or the character's server's (the default). */
+export type RegionSetting = Region | 'auto'
+
+/** A game server's region, from its id's second digit (2311: Europe); null for one of no global region. */
+export function regionOfServer(server: number | null): Region | null {
+  if (server === null) return null
+  return REGIONS.find((r) => r.digit === Math.floor(server / 100) % 10)?.id ?? null
+}
+
+/** "Kaisinel (NA East)": a game server by name (GAME_SERVERS) and region, or its id when not listed. */
+export function serverLabel(server: number): string {
+  const region = REGIONS.find((r) => r.id === regionOfServer(server))?.label
+  const name = GAME_SERVERS[server] ?? `Server ${server}`
+  return region ? `${name} (${region})` : name
+}
+
+/** The region the timers follow: the one chosen, or with 'auto' the character's server's (NA East
+ *  until a character has logged in). */
+export function resolveRegion(setting: RegionSetting, server: number | null): Region {
+  return setting === 'auto' ? (regionOfServer(server) ?? 'na-east') : setting
+}
 
 export interface TimerDef {
   id: TimerId
@@ -209,9 +242,11 @@ export const TIMERS: TimerDef[] = [
     id: 'kaira',
     name: 'Watcher Kaira',
     detail: 'Abyss boss in Lower Reshanta, at a random spot',
-    schedule: { kind: 'zoned', days: EVERY_DAY, times: [hm(1), hm(5), hm(9), hm(13), hm(17), hm(21)] },
+    // Every 3 hours from 02:00 UTC (02:00, 05:00 … 23:00). The map's countdowns: 05:00 UTC
+    // (2026-10-14 03:38, fieldboss_abyss.pcap), 23:00 UTC (2026-10-23), 02:00 UTC (2026-10-30,
+    // 30 minutes after the Executors). Whether it follows New York's daylight saving is not known.
+    schedule: { kind: 'every', every: 180, offset: 120 },
     lead: 10,
-    // The map's field boss list counted down to 21:00 New York (2026-10-13, fieldboss_abyss.pcap).
     confirmed: true,
     defaultOn: false,
   },
@@ -229,9 +264,8 @@ export const TIMERS: TimerDef[] = [
     id: 'siegeBosses',
     name: 'Executors (siege bosses)',
     detail: 'Executor Tamasa, Argo and Kaira in Lower Reshanta, shortly after the siege',
-    // 30 minutes after the siege: the map counted down to Saturday 21:30 New York (2026-10-23). On
-    // 2026-10-13 it had counted to Thursday 21:30 UTC; the game has moved it since. Monday and
-    // Thursday, the other siege days, are assumed.
+    // 30 minutes after the siege: the map counted down to Thursday 21:30 New York (2026-10-14
+    // capture) and Saturday 21:30 New York (2026-10-23). Monday is assumed.
     schedule: { kind: 'zoned', days: [1, 4, 6], times: [hm(21, 30)] },
     lead: 5,
     confirmed: false,
@@ -241,8 +275,8 @@ export const TIMERS: TimerDef[] = [
     id: 'nahma',
     name: 'Guardian Lord Nahma',
     detail: 'Abyss field boss in Lower Reshanta (three of them)',
-    // 21:00 server time: the map counted down to Friday 21:00 New York for all three (2026-10-23).
-    // On 2026-10-13 it had counted to Friday 21:00 UTC; the game has moved it since.
+    // 21:00 server time: the map counted down to Friday 21:00 New York for all three (2026-10-14
+    // capture, 2026-10-23, 2026-10-29).
     schedule: { kind: 'zoned', days: [0, 5], times: [hm(21)] },
     lead: 10,
     confirmed: true,
@@ -261,7 +295,7 @@ export const TIMERS: TimerDef[] = [
     id: 'dailyReset',
     name: 'Daily Reset',
     detail: 'Daily quests and limits reset',
-    schedule: { kind: 'zoned', days: EVERY_DAY, times: [hm(3)] },
+    schedule: { kind: 'zoned', days: EVERY_DAY, times: [hm(7)], zone: 'UTC' },
     lead: 0,
     confirmed: true,
     defaultOn: false,
@@ -270,7 +304,7 @@ export const TIMERS: TimerDef[] = [
     id: 'weeklyReset',
     name: 'Weekly Reset',
     detail: 'Weekly quests and limits reset (Wednesday)',
-    schedule: { kind: 'zoned', days: [3], times: [hm(3)] },
+    schedule: { kind: 'zoned', days: [3], times: [hm(7)], zone: 'UTC' },
     lead: 0,
     confirmed: true,
     defaultOn: false,
@@ -311,8 +345,33 @@ function zoneOffset(zone: string, t: number): number {
   return wall - Math.floor(t / 1000) * 1000
 }
 
-/** The first start at or after `from` (ms since epoch). Zoned ones in `region`'s time zone. */
-export function nextStart(s: Schedule, from: number, region: Region = 'na-east', bosses: FieldBosses = {}): number {
+/**
+ * Starts the game itself gave, by timer (ms; from its packets: the next daily reset at login, the
+ * weekly one with the weekly limits, the next siege on entering the Abyss). Kept per game server.
+ */
+export type GameTimes = Partial<Record<TimerId, number>>
+
+/** How far a start the game gave may sit from the schedule's own and still move it. */
+const MAX_SHIFT = 6 * 60 * MINUTE
+
+/**
+ * The first start at or after `from` (ms since epoch). Zoned ones in `region`'s time zone. With
+ * `game`, a start the game gave for this timer, the schedule is moved onto it: by however far its
+ * own start nearest it is (the region's time zone wrong, or the game's times changed), for every
+ * start after it too. One more than MAX_SHIFT away is not this schedule's, and is ignored.
+ */
+export function nextStart(s: Schedule, from: number, region: Region = 'na-east', bosses: FieldBosses = {}, game?: number): number {
+  if (game !== undefined && s.kind !== 'boss') {
+    // The schedule's own start nearest the game's: the first after it, or one before it in reach.
+    const before = scheduled(s, game - MAX_SHIFT, region)
+    const after = scheduled(s, game, region)
+    const shift = game - (game - before < after - game ? before : after)
+    if (Math.abs(shift) <= MAX_SHIFT) return scheduled(s, from - shift, region) + shift
+  }
+  return scheduled(s, from, region, bosses)
+}
+
+function scheduled(s: Schedule, from: number, region: Region, bosses: FieldBosses = {}): number {
   if (s.kind === 'boss') {
     // Its respawn, if the map said it is dead; up, or never seen, there is no next start to give.
     const b = bosses[s.boss]
@@ -346,27 +405,41 @@ export function nextStart(s: Schedule, from: number, region: Region = 'na-east',
  * are there even while the Timers addon is switched off (`on`); the starts are not.
  */
 export interface TimersState {
+  /** The region the times follow (the setting's, or the character's server's with Automatic). */
   region: Region
+  /** The character's game server (Kaisinel 1104), null until one has logged in. */
+  server: number | null
   /** The Timers addon is switched on. */
   on: boolean
   dailyReset: number
   weeklyReset: number
   /** Every timer's next start (ms), null when not known (a field boss nobody has seen die). */
   next: { id: TimerId; name: string; at: number | null }[]
+  /** The starts the game gave on this server, which the schedules above follow (nextStart's `game`). */
+  game: GameTimes
 }
 
-export function timersState(now: number, region: Region, on: boolean, bosses: FieldBosses = {}): TimersState {
-  const start = (id: TimerId): number => nextStart(TIMERS.find((t) => t.id === id)!.schedule, now, region)
+export function timersState(
+  now: number,
+  region: Region,
+  on: boolean,
+  bosses: FieldBosses = {},
+  server: number | null = null,
+  game: GameTimes = {},
+): TimersState {
+  const start = (id: TimerId): number => nextStart(TIMERS.find((t) => t.id === id)!.schedule, now, region, {}, game[id])
   const at = (t: TimerDef): number | null => {
-    const n = nextStart(t.schedule, now, region, bosses)
+    const n = nextStart(t.schedule, now, region, bosses, game[t.id])
     return Number.isFinite(n) ? n : null
   }
   return {
     region,
+    server,
     on,
     dailyReset: start('dailyReset'),
     weeklyReset: start('weeklyReset'),
     next: on ? TIMERS.map((t) => ({ id: t.id, name: t.name, at: at(t) })) : [],
+    game,
   }
 }
 
@@ -403,8 +476,9 @@ export function alertingStart(
   region: Region = 'na-east',
   lead = def.lead,
   bosses: FieldBosses = {},
+  game: GameTimes = {},
 ): number | null {
-  const next = nextStart(def.schedule, now - ALERT_AFTER_MS, region, bosses)
+  const next = nextStart(def.schedule, now - ALERT_AFTER_MS, region, bosses, game[def.id])
   return now >= next - lead * MINUTE && now < next + ALERT_AFTER_MS ? next : null
 }
 

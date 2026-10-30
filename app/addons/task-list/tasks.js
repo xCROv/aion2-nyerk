@@ -230,9 +230,6 @@
   /** Groups folded until opened. */
   const FOLDED_GROUPS = new Set(['Shop limits'])
 
-  /** Game servers by id: their tags, as the app knows them (shared/servers.ts). */
-  const SERVER_TAGS = { 1104: 'KAI', 2104: 'LUM' }
-
-  if (typeof module === 'object' && module.exports) module.exports = { TASKS, FOLDED_GROUPS, SERVER_TAGS }
-  else root.tasks = { TASKS, FOLDED_GROUPS, SERVER_TAGS }
+  if (typeof module === 'object' && module.exports) module.exports = { TASKS, FOLDED_GROUPS }
+  else root.tasks = { TASKS, FOLDED_GROUPS }
 })(this)

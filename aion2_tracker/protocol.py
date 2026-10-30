@@ -128,6 +128,80 @@ def split(buf: bytes, depth: int = 0, *, inner: bool = False) -> tuple[list[byte
     return out, consumed
 
 
+# A tunnel some players' game traffic goes through (a tester with ExitLag, 2026-10-30: their
+# collection.json held 29 "pets" read out of its bytes). Each message is `01 <u24 LE len>` and then
+# fields `<f> <tag> <len, f >> 2 bytes LE> <value>` (f 05: one length byte, 09: two). Tag 01 is
+# the kind (09 data, 0a an ack), 03 a 16-byte session id, 22 the data's sequence number, 23 the game
+# stream's own bytes, a slice of it as the server sent it:
+#   01 32 00 00 | 05 01 01 09 | 05 02 01 01 | 05 03 10 <16 bytes> | 05 22 02 ed 2c
+#   | 05 23 0b [0e 00 36 26 fd 20 8e a1 01 00 00] | 05 25 01 01
+# Read as the game stream itself it frames as junk: 803 records out of 784 KB, unwrapped 8,830.
+TUNNEL_DATA = 0x23
+_TUNNEL_START = b"\x05\x01\x01"  # the first field of every message: its kind
+
+
+def _tunnel_message(buf: bytes, pos: int) -> tuple[list[bytes], int] | None:
+    """The fields of the message at `pos`, as (tag-23 values, its end); None if it is not one. A
+    message not all here yet is ([], -1)."""
+    if len(buf) - pos < 7:
+        return [], -1
+    if buf[pos] != 1 or buf[pos + 4 : pos + 7] != _TUNNEL_START:
+        return None
+    end = pos + 4 + int.from_bytes(buf[pos + 1 : pos + 4], "little")
+    if end > len(buf):
+        return ([], -1) if end - pos <= MAX_PACKET_BYTES else None
+    data, i = [], pos + 4
+    while i < end:
+        f = buf[i]
+        n = f >> 2
+        if f & 3 != 1 or not 1 <= n <= 3 or i + 2 + n > end:
+            return None
+        size = int.from_bytes(buf[i + 2 : i + 2 + n], "little")
+        if i + 2 + n + size > end:
+            return None
+        if buf[i + 1] == TUNNEL_DATA:
+            data.append(buf[i + 2 + n : i + 2 + n + size])
+        i += 2 + n + size
+    return data, end
+
+
+def is_tunnel(buf: bytes) -> bool:
+    """Two messages back to back somewhere in `buf`: the stream is the tunnel's."""
+    at = buf.find(_TUNNEL_START)
+    while at != -1:
+        if (m := _tunnel_message(buf, at - 4)) and m[1] != -1 and (n := _tunnel_message(buf, m[1])) and n[1] != -1:
+            return True
+        at = buf.find(_TUNNEL_START, at + 1)
+    return False
+
+
+def maybe_tunnel(buf: bytes) -> bool:
+    """`buf` starts as a tunnel message would, too little of it here to tell (is_tunnel)."""
+    return len(buf) < 4096 and buf[:1] == b"\x01" and _TUNNEL_START.startswith(buf[4:7])
+
+
+def unwrap_tunnel(buf: bytes) -> tuple[bytes, int]:
+    """The game stream's bytes carried in `buf`'s messages, and how many bytes of `buf` were
+    consumed; the rest is a message still arriving. Bytes that are not a message (the stream joined
+    partway, or after a gap) are skipped to the next one."""
+    out, pos = bytearray(), 0
+    while pos < len(buf):
+        m = _tunnel_message(buf, pos)
+        if m is None:
+            nxt = buf.find(_TUNNEL_START, pos + 5)
+            if nxt == -1:
+                return bytes(out), max(pos, len(buf) - 6)
+            pos = nxt - 4
+            continue
+        data, end = m
+        if end == -1:
+            break
+        for d in data:
+            out += d
+        pos = end
+    return bytes(out), pos
+
+
 def opcode(pkt: bytes) -> tuple[int, int] | None:
     _, vlen = read_varint(pkt, 0)
     if vlen == 0 or vlen + 2 > len(pkt):
@@ -253,6 +327,14 @@ def parse_party_scope(pkt: bytes) -> PartyScope | None:
 
 
 OP_SOUL = (0x0D, 0x90)  # sent only to you: a pet soul was gained
+# Pet ids are 1001-1343 in every capture and the pet list (2026-10-30); room above for new pets. An
+# id outside is not a pet: a tester's collection held 29 "pets" with ids like 4014180470 and souls to
+# match, the bytes of some other record read as a collection.
+PET_IDS = range(1000, 10_000)
+
+
+def is_pet_id(pid: int) -> bool:
+    return pid in PET_IDS
 
 
 @dataclass(frozen=True)
@@ -276,10 +358,10 @@ def parse_souls(pkt: bytes) -> list[Soul]:
     souls = []
     for i in range(b[0]):
         entry = b[1 + 8 * i : 9 + 8 * i]
-        amount = int.from_bytes(entry[4:8], "little")
-        if not 0 < amount < 1000:
+        pid, amount = int.from_bytes(entry[:4], "little"), int.from_bytes(entry[4:8], "little")
+        if not 0 < amount < 1000 or not is_pet_id(pid):
             return []
-        souls.append(Soul(int.from_bytes(entry[:4], "little"), amount))
+        souls.append(Soul(pid, amount))
     return souls
 
 
@@ -315,6 +397,9 @@ def parse_crystal(pkt: bytes) -> Crystal | None:
 
 
 OP_COLLECTION = (0x00, 0x90)  # your whole pet collection, sent once when you enter the world
+# The most souls a pet holds in the collection: Lv2 tops out at 74 (track.LEVEL_NEED), Lv3 holds 0.
+MAX_COLLECTION_SOULS = 74
+MAX_PET_LEVEL = 3
 
 
 @dataclass(frozen=True)
@@ -328,7 +413,20 @@ def parse_collection(pkt: bytes) -> Collection | None:
     """`00 90 <u32> <varint n> n×(<pet id u32> <pet id u32> <level u32>) <varint m> m×(<pet id u32>
     <souls u32>) ...`. Identified 2026-10-09 from a login: Meadow Sparkie 32 and Hungry Brax 65
     matched the Pets menu. Levels do not follow from the souls alone (pets also come whole from
-    chests and shops), so both lists are kept."""
+    chests and shops), so both lists are kept. The souls list names pets the levels list does not
+    (Lv0 pets with 1-4 souls: 27 in login1.pcap), so it is checked on its own: one entry that is
+    not a pet id, a level or a souls count rejects the whole record (see PET_IDS)."""
+    c = _read_collection(pkt)
+    if c is None:
+        return None
+    if not all(is_pet_id(p) and 0 <= lv <= MAX_PET_LEVEL for p, lv in c.levels.items()):
+        return None
+    if not all(is_pet_id(p) and 0 <= s <= MAX_COLLECTION_SOULS for p, s in c.souls.items()):
+        return None
+    return c
+
+
+def _read_collection(pkt: bytes) -> Collection | None:
     if opcode(pkt) != OP_COLLECTION:
         return None
     _, vlen = read_varint(pkt, 0)
@@ -529,6 +627,13 @@ def _name(b: bytes, pos: int) -> str | None:
     return name if name.isalnum() else None
 
 
+def is_server_id(server: int) -> bool:
+    """A game server's id as the game writes them: faction 1-2, region 1-5, then 01-99 (Kaisinel
+    1104, Zikel 2102; all 182 in app/src/shared/gameServers.ts). A tester's tunnel junk (2026-10-30)
+    was read as a character "M4" on server 12595, the bytes `33 31`."""
+    return 1 <= server // 1000 <= 2 and 1 <= server // 100 % 10 <= 5 and 1 <= server % 100 <= 99
+
+
 def parse_character(pkt: bytes) -> Character | None:
     """Which character you are: `33 36 <entity varint> <5 bytes> <len u8> <name> <server u16 LE>
     ...` (~2.2 KB), once at every zone entry, logins included (right after the collection, `00 90`).
@@ -551,6 +656,8 @@ def parse_character(pkt: bytes) -> Character | None:
             if end + 2 > len(b):
                 return None
             server = int.from_bytes(b[end : end + 2], "little")
+            if not is_server_id(server):
+                return None
             marker, guild, k = b"\x00\x00\x00\x00" + b[end : end + 2], None, end + 2
             while guild is None and (k := b.find(marker, k + 1)) != -1:
                 guild = _guild(b, k + 6)
@@ -833,3 +940,86 @@ def parse_shop(pkt: bytes) -> Shop | None:
             return None
     next_at = struct.unpack_from("<Q", b, o)[0] if o + 8 <= len(b) else None
     return Shop(tab, items, next_at if next_at and 1.5e12 < next_at < 4e12 else None)
+
+
+# The times the game gives for its own schedules (docs/FINDINGS.md, "Resets and scheduled events
+# the game sends", 2026-10-29). Every one is an absolute time (ms since 1970, UTC), on a whole
+# minute: anything else is a misread (an opcode moved by a patch, say), and is dropped.
+OP_NEXT_RESET = (0x23, 0xE2)  # the next daily reset, at login and on zone entry
+OP_LIMITS = (0x8E, 0x56)  # limits (shop and weekly caps), each with its own next reset
+OP_SIEGE = (0x07, 0xE3)  # the Artifact Siege, on entering the Abyss
+OP_SIEGE_UPDATE = (0x05, 0xE3)  # the same times, sent again with an artifact's change
+SIEGE_MARK = bytes.fromhex("e903000003")  # artifact 1001, then the siege's times
+
+
+def _game_time(v: int) -> bool:
+    return 1_600_000_000_000 < v < 2_200_000_000_000 and v % 60_000 == 0
+
+
+def parse_next_reset(pkt: bytes) -> int | None:
+    """`23 e2 <next daily reset u64 ms> <u32 0>`: 07:00 UTC in all 15 captures that have it
+    (9-27 Oct 2026, NA East), the next one after the packet."""
+    if opcode(pkt) != OP_NEXT_RESET:
+        return None
+    b = _body(pkt)
+    if len(b) < 8:
+        return None
+    at = int.from_bytes(b[:8], "little")
+    return at if _game_time(at) else None
+
+
+@dataclass(frozen=True)
+class Limit:
+    id: int
+    value: int
+    reset_ms: int  # its next reset; 2100-01-01 for one that never resets
+
+
+def parse_limits(pkt: bytes) -> list[Limit] | None:
+    """`8e 56 00 00 <n u8>` then n × `<id u32> <value u32> <next reset u64 ms>`. Most reset at the
+    weekly reset (Wednesday 07:00 UTC); 1262 on the 1st of the month; 1254 never (gartua,
+    pvp_kills, shop_and_duties)."""
+    if opcode(pkt) != OP_LIMITS:
+        return None
+    b = _body(pkt)
+    if len(b) < 3 or len(b) < 3 + 16 * b[2]:
+        return None
+    out = []
+    for i in range(b[2]):
+        lid, value, at = struct.unpack_from("<IIQ", b, 3 + 16 * i)
+        if not 1_600_000_000_000 < at < 5_000_000_000_000:
+            return None
+        out.append(Limit(lid, value, at))
+    return out
+
+
+def weekly_reset(limits: list[Limit], now_ms: float) -> int | None:
+    """The weekly reset, from the limits: the reset most of them share within the next 8 days."""
+    soon = [lim.reset_ms for lim in limits
+            if now_ms < lim.reset_ms <= now_ms + 8 * 86_400_000 and _game_time(lim.reset_ms)]
+    if not soon:
+        return None
+    at, n = max(((t, soon.count(t)) for t in set(soon)), key=lambda x: (x[1], -x[0]))
+    return at if n * 2 > len(soon) else None
+
+
+@dataclass(frozen=True)
+class Siege:
+    last_end_ms: int  # when the last siege ended (its 40 minutes, or earlier when won)
+    next_ms: int  # when the next one starts
+
+
+def parse_siege(pkt: bytes) -> Siege | None:
+    """`07 e3` (on entering the Abyss) and `05 e3` (an update): `… e9 03 00 00 03 <u8> <last end
+    u64 ms> <next start u64 ms>` then the artifacts. Read 2026-10-14: last end Tue 01:40 UTC
+    (Monday's 21:00 New York siege), next Fri 01:00 UTC (Thursday 21:00 New York)."""
+    if opcode(pkt) not in (OP_SIEGE, OP_SIEGE_UPDATE):
+        return None
+    b = _body(pkt)
+    i = b.find(SIEGE_MARK)
+    if i < 0 or i + len(SIEGE_MARK) + 17 > len(b):
+        return None
+    last, nxt = struct.unpack_from("<QQ", b, i + len(SIEGE_MARK) + 1)
+    if not (1_600_000_000_000 < last < nxt and _game_time(nxt)):
+        return None
+    return Siege(last, nxt)
