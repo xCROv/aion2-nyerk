@@ -44,7 +44,7 @@ stdin, one JSON object per line:
     {"cmd": "resetSession"}             start the session's soul counts again; answered with a
                                         snapshot
     {"cmd": "dumpSession"}              every character's session counts, answered with
-                                        {"type": "session", "sessions": {"Cro": {"1006": 3}}}
+                                        {"type": "session", "sessions": {"1104:Cro": {"1006": 3}}}
                                         (the app keeps them across an update restart)
     {"cmd": "restoreSession", "sessions": {...}, "world": 1010 | null, "position": [x, y] | null}
                                         put them back after the restart; answered with a snapshot
