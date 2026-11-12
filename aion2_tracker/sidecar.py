@@ -81,6 +81,9 @@ from .track import STORE, Tracker, load
 NEARBY_EVERY_S = 0.25
 # Debug logging keeps this many recordings of the game connection, the newest.
 RECORDINGS_KEPT = 3
+# After live capture failed (no adapter opened, or every one stopped), how long until it is tried
+# again: the app asks for a capture only when the game starts.
+CAPTURE_RETRY_S = 10.0
 
 
 def recording(folder: str | None) -> str | None:
@@ -151,8 +154,8 @@ def main() -> None:
     # stream: the next game is a new connection, to lock onto afresh.
     capturing: list[threading.Event | None] = [None]
 
-    def run_capture(halt: threading.Event) -> None:
-        stream = capture.GameStream(on_packet, on_lock=on_lock)
+    def capture_once(halt: threading.Event, stream: capture.GameStream) -> bool:
+        """A capture until it is halted or ends; False if it failed."""
         try:
             emit({"type": "status", "state": "listening", "source": a.replay or "live"})
             if a.replay:
@@ -164,6 +167,14 @@ def main() -> None:
                 emit({"type": "status", "state": "stopped"})
         except Exception as e:  # noqa: BLE001 -- reported to the app, which shows it
             emit({"type": "status", "state": "error", "detail": f"{type(e).__name__}: {e}"})
+            return False
+        return True
+
+    def run_capture(halt: threading.Event) -> None:
+        stream = capture.GameStream(on_packet, on_lock=on_lock)
+        while not capture_once(halt, stream):
+            if a.replay or halt.wait(CAPTURE_RETRY_S):
+                return
 
     def set_capture(on: bool) -> None:
         if on and capturing[0] is None:

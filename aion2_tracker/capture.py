@@ -9,7 +9,9 @@ port is the proxy's, and a reconnect gets a new one: when the locked port stops 
 terminator and another one carries it, the lock moves there.
 
 Live capture listens on every adapter that has an address at once: with a VPN or a ping reducer
-the game's traffic is only readable on the tunnel adapter, which is not Windows' default one.
+the game's traffic is only readable on the tunnel adapter, which is not Windows' default one. The
+adapters are looked at again every few seconds, so a tunnel that comes up (or back) later is
+opened too.
 """
 
 from __future__ import annotations
@@ -51,6 +53,9 @@ CAPTURE_FILTER = "tcp and not port 443 and not port 80"
 NPCAP_BUFFER = 16 * 1024 * 1024
 # Debug logging's recording of the game connection stops past this (the stream is ~5 MB an hour).
 RECORD_LIMIT = 100_000_000
+# How often live capture looks at the adapters again, for one that came up or changed since (a VPN
+# or ping reducer started, or reconnected, after the capture did).
+ADAPTER_SCAN_S = 5.0
 
 
 class Reassembler:
@@ -347,9 +352,14 @@ def pick_interfaces(ifaces) -> list:
             if i.is_valid() and any(not ip.startswith("169.254.") for ip in i.ips.get(4, []))]
 
 
-def _open(log: Callable[[str], None]) -> dict:
-    """{socket: adapter name} for every adapter that opens; raises if none does."""
-    chosen = pick_interfaces(conf.ifaces.values()) or [conf.iface]
+def _identity(iface) -> tuple:
+    """What tells an adapter from an earlier one of the same name (a tunnel made again, or
+    reconnected): its index and addresses."""
+    return iface.index, tuple(iface.ips.get(4, []))
+
+
+def _open(log: Callable[[str], None], chosen: list) -> dict:
+    """{socket: adapter name} for each adapter of `chosen` that opens; raises if none does."""
     sockets, opened, failed = {}, [], []
     for iface in chosen:
         try:
@@ -402,14 +412,15 @@ def live(stream: GameStream, iface: str | None = None, save_to: str | None = Non
     RECORD_LIMIT) to a .pcap a player can send."""
     from scapy.utils import PcapWriter
 
-    sockets = {conf.L2listen(iface=iface, filter=CAPTURE_FILTER): iface} if iface else _open(log)
+    chosen = [] if iface else pick_interfaces(conf.ifaces.values()) or [conf.iface]
+    sockets = {conf.L2listen(iface=iface, filter=CAPTURE_FILTER): iface} if iface else _open(log, chosen)
     writer = PcapWriter(save_to, append=True, sync=True) if save_to else None
     recorder = PcapWriter(record_to, append=True, sync=True) if record_to else None
     recorded = [0]
-    counts = {name: 0 for name in sockets.values()}  # TCP packets per adapter since the last report
+    counts: dict[str, int] = {}  # TCP packets per adapter since the last report
     failures: set[str] = set()  # each kind of packet failure, logged once
     game_on: list[str | None] = [None]  # the adapter the game stream is on
-    npcap_was = {name: _npcap_counts(sock) for sock, name in sockets.items()}
+    npcap_was: dict[str, tuple[int, int, int] | None] = {}
 
     def packet(cls, raw: bytes, ts: float):
         p = cls(raw)
@@ -468,13 +479,16 @@ def live(stream: GameStream, iface: str | None = None, save_to: str | None = Non
     halt = stop or threading.Event()
     lock = threading.Lock()  # one packet at a time into the stream, whichever adapter it came on
     ended: dict[str, str] = {}  # adapters whose reading failed for good, and why
+    readers: dict = {}  # socket -> (the thread reading it, that thread's stop)
+    # Each adapter as it was when last opened (or tried): its index and addresses.
+    known = {i.name: _identity(i) for i in chosen}
 
-    def read(sock, name: str) -> None:
+    def read(sock, name: str, done: threading.Event) -> None:
         # Each adapter read packet after packet until none is waiting (a read waits up to 100 ms).
         # Scapy's sniffer read one packet each time an adapter signalled: an adapter that hands
         # packets over in batches (a Realtek 2.5GbE, 2026-10-28) got one of each batch read, Npcap's
         # buffer filled, and 90-100% of the game stream was dropped.
-        while not halt.is_set():
+        while not halt.is_set() and not done.is_set():
             try:
                 cls, raw, ts = sock.recv_raw()
             except Exception as e:  # noqa: BLE001 -- the adapter is gone: the others carry on
@@ -486,21 +500,66 @@ def live(stream: GameStream, iface: str | None = None, save_to: str | None = Non
             with lock:
                 handle(name, cls, raw, float(ts))
 
-    readers = [threading.Thread(target=read, args=(sock, name), name=f"capture {name}", daemon=True)
-               for sock, name in sockets.items()]
-    for sock, name in sockets.items():
+    def start(sock, name: str) -> None:
         _bigger_buffer(sock, name, log)
-    started = next_report = time.monotonic()
+        with lock:
+            sockets[sock] = name
+            counts.setdefault(name, 0)
+            npcap_was[name] = _npcap_counts(sock)
+        done = threading.Event()
+        readers[sock] = (threading.Thread(target=read, args=(sock, name, done), name=f"capture {name}", daemon=True), done)
+        readers[sock][0].start()
+
+    def let_go(sock) -> None:
+        reader, done = readers.pop(sock)
+        done.set()
+        reader.join(timeout=2.0)
+        sock.close()
+        with lock:
+            del sockets[sock]
+
+    def scan() -> None:
+        """Opens the adapters that came up or changed since the last look, a VPN's tunnel say, and
+        those whose reading ended; one that does not open is tried again once it changes."""
+        for sock in [s for s, (reader, _) in readers.items() if not reader.is_alive()]:
+            known.pop(sockets[sock], None)
+            let_go(sock)
+        try:
+            conf.ifaces.reload()
+        except Exception as e:  # noqa: BLE001 -- the adapters already open carry on
+            log(f"[capture] could not list the adapters again: {type(e).__name__}: {e}")
+            return
+        changed = [i for i in pick_interfaces(conf.ifaces.values()) if known.get(i.name) != _identity(i)]
+        if not changed:
+            return
+        names = {i.name for i in changed}
+        for sock in [s for s, name in sockets.items() if name in names]:
+            let_go(sock)
+        known.update({i.name: _identity(i) for i in changed})
+        try:
+            opened = _open(log, changed)
+        except RuntimeError:
+            return  # each failure is logged
+        for sock, name in opened.items():
+            start(sock, name)
+
+    started = next_report = next_scan = time.monotonic()
     next_report += REPORT_S
+    next_scan += ADAPTER_SCAN_S
     reports = 0
     if recorder is not None:
         log(f"[capture] debug logging: recording the game connection to {record_to}")
-    for t in readers:
-        t.start()
+    for sock, name in list(sockets.items()):
+        start(sock, name)
     try:
         # Short waits, so Ctrl+C gets through on Windows.
         while not halt.wait(1.0):
-            if not any(t.is_alive() for t in readers):
+            reading = any(reader.is_alive() for reader, _ in readers.values())
+            if not iface and (not reading or time.monotonic() >= next_scan):
+                scan()
+                next_scan = time.monotonic() + ADAPTER_SCAN_S
+                reading = any(reader.is_alive() for reader, _ in readers.values())
+            if not reading:
                 raise RuntimeError(f"capture ended on its own: {'; '.join(f'{n}: {e}' for n, e in ended.items()) or 'every adapter failed'}")
             if time.monotonic() >= next_report:
                 reports += 1
@@ -520,8 +579,8 @@ def live(stream: GameStream, iface: str | None = None, save_to: str | None = Non
         pass
     finally:
         halt.set()
-        for t in readers:
-            t.join(timeout=2.0)
+        for reader, _ in readers.values():
+            reader.join(timeout=2.0)
         for sock in sockets:
             sock.close()
         if writer is not None:
