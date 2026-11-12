@@ -23,6 +23,7 @@ import { app, BrowserWindow, screen, shell, type Rectangle } from 'electron'
 import { join } from 'node:path'
 import { broadcast } from './broadcast.ts'
 import { featureOn } from './builtins.ts'
+import { mayNavigate } from './navigation.ts'
 import { settings } from './settings.ts'
 import { tracker } from './tracker.ts'
 import type { CollectionView, EventChannels, MapView, PanelEdges } from '../shared/ipc.ts'
@@ -102,8 +103,7 @@ function overlayWindow(options: Electron.BrowserWindowConstructorOptions): Brows
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (event, url) => {
-    const dev = process.env['ELECTRON_RENDERER_URL']
-    if (!(url.startsWith('file://') || (dev && url.startsWith(dev)))) event.preventDefault()
+    if (!mayNavigate(url, win.webContents.getURL())) event.preventDefault()
   })
   return win
 }
