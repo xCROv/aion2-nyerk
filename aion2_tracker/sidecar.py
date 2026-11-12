@@ -234,7 +234,7 @@ def main() -> None:
                             tracker.addons.settings(str(msg["addon"]), dict(msg.get("values") or {}))
             else:
                 emit({"type": "error", "detail": f"unknown command {cmd!r}"})
-        except (ValueError, KeyError, TypeError) as e:
+        except Exception as e:  # noqa: BLE001 -- a command that fails must not end the helper and its session
             emit({"type": "error", "detail": f"bad command: {e}"})
     stop.set()
     if capturing[0] is not None:

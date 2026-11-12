@@ -64,6 +64,9 @@ CONFIRM_JUMP = 20_000.0
 # tracker.log) and goes out of Nearby. Short, so a stale one goes quickly; one taken out wrongly
 # comes back with the next record naming it.
 GONE_SILENT_S = 15.0
+# Windows Defender or OneDrive can hold the collection a moment just as it is replaced: the waits
+# before each try again.
+SAVE_RETRIES_S = (0.05, 0.1, 0.2, 0.4)
 
 
 def load(path: Path = STORE) -> dict:
@@ -99,6 +102,12 @@ def drop_non_pets(data: dict) -> int:
 def save(data: dict, path: Path = STORE) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    for wait in SAVE_RETRIES_S:
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            time.sleep(wait)
     tmp.replace(path)
 
 
@@ -524,8 +533,13 @@ class Tracker:
         return self.data["pets"].setdefault(str(pid), {"souls": 0, "votes": {}})
 
     def _save(self) -> None:
-        if self.persist:
+        if not self.persist:
+            return
+        try:
             save(self.data, self.store)
+        except OSError as e:
+            # The counts stay in memory: the next save writes them.
+            print(f"collection not saved: {e}", file=sys.stderr)
 
     def character(self) -> dict | None:
         """The character playing (the one the collection is), or None before one was seen."""
@@ -668,9 +682,9 @@ class Tracker:
         credited = [(ts - t, owner) for t, _mob, owner in self.credits if 0 <= ts - t <= NAME_WINDOW_S]
         if credited:
             self.self_votes[min(credited)[1]] += 1
-        self._save()
         self.on_event({"type": "soul", "ts": ts, "amount": soul.amount, "pet": self.view(soul.pet_id),
                        "levelUp": levelled, "levelUndone": undone})
+        self._save()
 
     def _crystal(self, ts: float, crystal: P.Crystal) -> None:
         """Genus crystals from a monster whose pet is maxed. The message names no pet, so it is
@@ -736,9 +750,10 @@ class Tracker:
                 pet["corrected"]["crystals"] += amount
             if name := self._npc_name(code):
                 pet["votes"][name] = pet["votes"].get(name, 0) + 1
-            self._save()
             event["pet"] = self.view(pid)
         self.on_event(event)
+        if pick:
+            self._save()
 
     def _npc_name(self, code: int | None) -> str | None:
         return self.npcs.get(str(code), {}).get("name") if code else None
