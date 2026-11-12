@@ -480,6 +480,15 @@ def _body(pkt: bytes) -> bytes:
     return pkt[vlen + 2 :]
 
 
+# Game coordinates stay within this either side of 0.
+MAX_COORD = 500_000
+
+
+def _on_map(x: float, y: float) -> bool:
+    """A position that can be one: NaN and infinity, which a misread can give, are not."""
+    return abs(x) < MAX_COORD and abs(y) < MAX_COORD
+
+
 def parse_map_load(pkt: bytes) -> MapLoad | None:
     """`21 36 <u32> <u32 map id> <8 bytes> <f32 x> <f32 y> <f32 z> ...`"""
     if opcode(pkt) != OP_MAP_LOAD:
@@ -487,7 +496,8 @@ def parse_map_load(pkt: bytes) -> MapLoad | None:
     b = _body(pkt)
     if len(b) < 28:
         return None
-    return MapLoad(int.from_bytes(b[4:8], "little"), _f32(b, 16), _f32(b, 20))
+    x, y = _f32(b, 16), _f32(b, 20)
+    return MapLoad(int.from_bytes(b[4:8], "little"), x, y) if _on_map(x, y) else None
 
 
 def parse_self_teleport(pkt: bytes) -> tuple[float, float] | None:
@@ -497,7 +507,8 @@ def parse_self_teleport(pkt: bytes) -> tuple[float, float] | None:
     b = _body(pkt)
     if len(b) < 18 or b[0] != 0:
         return None
-    return _f32(b, 6), _f32(b, 10)
+    x, y = _f32(b, 6), _f32(b, 10)
+    return (x, y) if _on_map(x, y) else None
 
 
 def parse_cast(pkt: bytes) -> tuple[int, float, float] | None:
@@ -532,12 +543,12 @@ def parse_cast(pkt: bytes) -> tuple[int, float, float] | None:
         if not m or not k or off + 12 > len(b):
             return None
         x, y, z = _f32(b, off), _f32(b, off + 4), _f32(b, off + 8)
-        if 1000 < abs(x) < 500_000 and 1000 < abs(y) < 500_000 and abs(z) < MAX_HEIGHT:
+        if 1000 < abs(x) < MAX_COORD and 1000 < abs(y) < MAX_COORD and abs(z) < MAX_HEIGHT:
             return actor, x, y
         return None
     for off in range(n + 6, min(len(b) - 12, n + 24)):
         x, y, z = _f32(b, off), _f32(b, off + 4), _f32(b, off + 8)
-        if 1000 < abs(x) < 500_000 and 1000 < abs(y) < 500_000 and abs(z) < MAX_HEIGHT:
+        if 1000 < abs(x) < MAX_COORD and 1000 < abs(y) < MAX_COORD and abs(z) < MAX_HEIGHT:
             return actor, x, y
     return None
 
@@ -577,7 +588,7 @@ def parse_effect_position(pkt: bytes) -> tuple[int, float, float] | None:
         start = i + 8 + n
         for off in range(start, min(start + 9, len(b) - 11)):
             x, y, z = _f32(b, off), _f32(b, off + 4), _f32(b, off + 8)
-            if 1000 < abs(x) < 500_000 and 1000 < abs(y) < 500_000 and abs(z) < MAX_HEIGHT:
+            if 1000 < abs(x) < MAX_COORD and 1000 < abs(y) < MAX_COORD and abs(z) < MAX_HEIGHT:
                 return target, x, y
     return None
 

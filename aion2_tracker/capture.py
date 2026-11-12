@@ -14,11 +14,13 @@ the game's traffic is only readable on the tunnel adapter, which is not Windows'
 
 from __future__ import annotations
 
+import collections
 import socket
 import struct
 import sys
 import threading
 import time
+import traceback
 from collections.abc import Callable, Iterator
 
 from scapy.all import IP, TCP, PcapReader, conf
@@ -167,6 +169,7 @@ class GameStream:
         # numbers went), those that reached the stream in order, and the gaps given up on.
         self.seq_end: dict[tuple[str, int, str, int], int] = {}
         self.sent = self.got = self.gaps = self.lost = 0
+        self.failures: collections.Counter = collections.Counter()  # packets that failed, by where
 
     def health_report(self, always: bool = False) -> str | None:
         """Locked: how much of what the server sent was captured, when some was missed (or
@@ -270,7 +273,19 @@ class GameStream:
         self.got += flow.appended - before
         for pkt in packets:
             self.decoded += 1
-            self.on_packet(ts, pkt)
+            try:
+                self.on_packet(ts, pkt)
+            except Exception as e:  # noqa: BLE001 -- one packet that fails must not take the rest of the segment along
+                self._failed(pkt, e)
+
+    def _failed(self, pkt: bytes, error: Exception) -> None:
+        where = traceback.extract_tb(error.__traceback__)[-1]
+        kind = f"{type(error).__name__} in {where.name} line {where.lineno}"
+        self.failures[kind] += 1
+        n = self.failures[kind]
+        # The 1st, 2nd, 4th, 8th... of each kind: how often it keeps happening, without flooding the log.
+        if n & (n - 1) == 0:
+            print(f"[capture] a packet ({pkt[:4].hex(' ')} ...) failed, {n} so far: {kind}: {error}", file=sys.stderr)
 
     def _gap(self, n: int) -> None:
         self.gaps += 1
