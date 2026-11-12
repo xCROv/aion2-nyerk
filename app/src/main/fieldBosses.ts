@@ -23,7 +23,7 @@ import { game } from './game.ts'
 import { machineHash } from './machine.ts'
 import { settings } from './settings.ts'
 import { log } from './tracker.ts'
-import type { FieldBosses } from '../shared/timers.ts'
+import { mergeSharedBosses, type FieldBosses } from '../shared/timers.ts'
 
 // A2T_API: another server, to try the sharing against a local aion2-api.
 const API = process.env['A2T_API'] ?? 'https://nyerk.app/a2/timers'
@@ -31,6 +31,7 @@ const POLL_MS = 90_000
 /** Uploads at most this often (the list comes every 3 s while the map is open). */
 const UPLOAD_EVERY_MS = 30_000
 const MAX_BOSSES = 64
+const FETCH_TIMEOUT_MS = 15_000
 
 export interface MapBoss {
   id: number
@@ -138,7 +139,7 @@ async function upload(): Promise<void> {
   lastUpload = Date.now()
   const body = JSON.stringify({ server, world: p.world, observed: p.seen, bosses: p.list.map(({ id, up, at }) => ({ id, up, at })) })
   try {
-    const res = await fetch(API, { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body })
+    const res = await fetch(API, { method: 'POST', headers: { ...headers(), 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     if (await checkBanned(res)) return
     if (!res.ok) log(`field bosses: upload answered ${res.status}`)
   } catch (err) {
@@ -149,24 +150,13 @@ async function upload(): Promise<void> {
 async function poll(): Promise<void> {
   if (!sharing() || !(game.running() || process.env['A2T_REPLAY'])) return
   try {
-    const res = await fetch(`${API}?server=${server}`, { headers: headers() })
+    const res = await fetch(`${API}?server=${server}`, { headers: headers(), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
     if (await checkBanned(res)) return
     if (!res.ok) return
     const data = (await res.json()) as { server?: unknown; bosses?: unknown }
-    if (data.server !== server || typeof data.bosses !== 'object' || data.bosses === null) return
-    let n = 0
-    const next = { ...bosses }
-    for (const [key, v] of Object.entries(data.bosses as Record<string, unknown>)) {
-      const id = Number(key)
-      const s = v as { up?: unknown; at?: unknown; observed?: unknown }
-      // Only what fits the shape: the server builds it from numbers, but nothing is taken on trust.
-      if (!Number.isInteger(id) || typeof s.up !== 'boolean' || !Number.isFinite(s.at) || !Number.isFinite(s.observed)) continue
-      const mine = next[id]
-      if (mine && mine.seen >= (s.observed as number)) continue
-      next[id] = { up: s.up, at: s.at as number, seen: s.observed as number, source: 'shared' }
-      n++
-    }
-    if (n) {
+    if (data.server !== server) return
+    const next = mergeSharedBosses(bosses, data.bosses, Date.now())
+    if (next) {
       bosses = next
       changed()
     }
