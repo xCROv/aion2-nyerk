@@ -201,6 +201,33 @@ export const FIELD_BOSS_ZONES: { world: number; name: string }[] = [
 ]
 export const bossZone = (boss: number): number => Math.floor(boss / 100)
 
+const KNOWN_BOSSES = new Set(FIELD_BOSSES.map((b) => b.boss))
+const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+
+/**
+ * The shared timers' answer laid over `bosses`, boss by boss where it is newer; null when it adds
+ * nothing. Nothing in it is taken on trust: only the bosses listed above (which also bounds how
+ * many), an entry of the wrong shape is skipped rather than the whole answer, and a reading is
+ * never later than `now`, so a sharer whose clock runs fast cannot outrank everyone's readings.
+ */
+export function mergeSharedBosses(bosses: FieldBosses, shared: unknown, now: number): FieldBosses | null {
+  if (typeof shared !== 'object' || shared === null) return null
+  const next = { ...bosses }
+  let added = 0
+  for (const [key, entry] of Object.entries(shared)) {
+    const id = Number(key)
+    if (!KNOWN_BOSSES.has(id) || typeof entry !== 'object' || entry === null) continue
+    const { up, at, observed } = entry as { up?: unknown; at?: unknown; observed?: unknown }
+    if (typeof up !== 'boolean' || !isTime(at) || !isTime(observed)) continue
+    const seen = Math.min(observed, now)
+    const mine = next[id]
+    if (mine && mine.seen >= seen) continue
+    next[id] = { up, at, seen, source: 'shared' }
+    added++
+  }
+  return added ? next : null
+}
+
 export const TIMERS: TimerDef[] = [
   {
     id: 'shugo',

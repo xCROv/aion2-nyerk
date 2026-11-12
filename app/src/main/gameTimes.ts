@@ -8,8 +8,9 @@
  * login still places Wednesday's, and each server has its own.
  */
 import { app } from 'electron'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeFileAtomic } from './atomicWrite.ts'
 import { log } from './tracker.ts'
 import { TIMERS, type GameTimes, type TimerId } from '../shared/timers.ts'
 
@@ -30,7 +31,7 @@ function all(): Record<string, GameTimes> {
 
 function save(): void {
   try {
-    writeFileSync(file(), JSON.stringify(all()))
+    writeFileAtomic(file(), JSON.stringify(all()))
   } catch (err) {
     log(`game times: not saved: ${String(err)}`)
   }
