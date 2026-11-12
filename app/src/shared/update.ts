@@ -32,6 +32,18 @@ export interface UpdateStatus {
   restartAt: number | null
 }
 
+/** What an automatic check does with an update it has downloaded. */
+export type AutoInstallStep = 'restart' | 'wait-for-game' | 'ask'
+
+/**
+ * A bundle installs itself, but never under someone playing. An installer replaces the whole
+ * install, so it always waits for the player's Restart to install.
+ */
+export function autoInstallStep(kind: UpdateKind | null, gameRunning: boolean): AutoInstallStep {
+  if (kind !== 'bundle') return 'ask'
+  return gameRunning ? 'wait-for-game' : 'restart'
+}
+
 export const initialUpdateStatus = (current: string): UpdateStatus => ({
   state: 'idle',
   current,

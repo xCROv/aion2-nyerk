@@ -10,11 +10,11 @@
  *   of the installers).
  *
  * Automatic, and said out loud: the feed is checked at start and every hour while Settings allows
- * it. An update found at start is downloaded and installed straight away; the panel and a Windows
- * notification say so a few seconds before the restart. One found by the hourly check while Aion 2
- * is running waits for the game to close (or the Restart button, or the next start) rather than
- * restart under someone mid-fight. Every restart carries the session across (restart.ts), so
- * nothing is lost but the second it takes.
+ * it, and an update found is downloaded. A bundle then installs itself; the panel and a Windows
+ * notification say so a few seconds before the restart. While Aion 2 is running it waits for the
+ * game to close (or the Restart button) rather than restart under someone mid-fight. An installer
+ * waits for the panel's Restart to install, and a notification says it is there. Every restart
+ * carries the session across (restart.ts), so nothing is lost but the second it takes.
  *
  * A version that was installed and is still offered after the restart did not take: it is tried
  * twice, then left to a click (restart.ts, attempts). A development run has no feed and says so.
@@ -24,7 +24,7 @@ import { autoUpdater } from 'electron-updater'
 import { join } from 'node:path'
 import { DISPLAY_NAME } from '../shared/app.ts'
 import { BUNDLE_FEED_URL, compareVersions, readActiveBundle, type BundleManifest, type BundleOffer } from '../shared/bundle.ts'
-import { initialUpdateStatus, type UpdateStatus } from '../shared/update.ts'
+import { autoInstallStep, initialUpdateStatus, type UpdateStatus } from '../shared/update.ts'
 import { broadcast } from './broadcast.ts'
 import { activateBundle, checkForBundle, downloadBundle, markBundleStarted, reconcileBundles, type BundleDeps } from './bundles.ts'
 import { game } from './game.ts'
@@ -50,6 +50,7 @@ let wired = false
 let pending: { kind: 'bundle'; offer: BundleOffer; manifest: BundleManifest } | { kind: 'installer' } | null = null
 let restartTimer: NodeJS.Timeout | null = null
 let waitingForGameToClose = false
+let askedToInstall: string | null = null
 
 function set(patch: Partial<UpdateStatus>): void {
   status = { ...status, ...patch }
@@ -198,11 +199,16 @@ function restartSoon(): void {
   restartTimer = setTimeout(() => void updates.install(), RESTART_NOTICE_MS)
 }
 
-/**
- * Check, download and install without a click. `launch`: restart as soon as it is downloaded.
- * `hourly`: the same while the game is closed; while it runs, wait for it to close.
- */
-async function autoUpdate(trigger: 'launch' | 'hourly'): Promise<void> {
+/** Once per version: the hourly check finds the same installer still waiting. */
+function askToInstall(): void {
+  if (askedToInstall === status.version) return
+  askedToInstall = status.version
+  log(`update: installer ${status.version} is ready; it installs when Restart to install is clicked`)
+  notify(`Version ${status.version} is ready. Choose Restart to install in the ${DISPLAY_NAME} panel when it suits you; it picks up where it left off.`)
+}
+
+/** Check and download without a click, then install as autoInstallStep says. */
+async function autoUpdate(): Promise<void> {
   if (!settings.get('autoUpdateCheck')) return
   await updates.check()
   if (status.state !== 'available' && status.state !== 'ready') return
@@ -212,12 +218,17 @@ async function autoUpdate(trigger: 'launch' | 'hourly'): Promise<void> {
   }
   await updates.download()
   if (status.state !== 'ready') return
-  if (trigger === 'hourly' && game.running()) {
-    if (!waitingForGameToClose) log(`update: ${status.version} is ready; it installs once Aion 2 closes`)
-    waitingForGameToClose = true
-    return
+  switch (autoInstallStep(status.kind, game.running())) {
+    case 'ask':
+      askToInstall()
+      return
+    case 'wait-for-game':
+      if (!waitingForGameToClose) log(`update: ${status.version} is ready; it installs once Aion 2 closes`)
+      waitingForGameToClose = true
+      return
+    case 'restart':
+      restartSoon()
   }
-  restartSoon()
 }
 
 export const updates = {
@@ -332,9 +343,9 @@ export function startUpdateChecks(): void {
     log(`update warning: could not tidy the bundles folder: ${String(err)}`),
   )
 
-  setTimeout(() => void autoUpdate('launch'), LAUNCH_DELAY_MS).unref()
-  setInterval(() => void autoUpdate('hourly'), INTERVAL_MS).unref()
-  // An update downloaded while the game ran installs once it closes.
+  setTimeout(() => void autoUpdate(), LAUNCH_DELAY_MS).unref()
+  setInterval(() => void autoUpdate(), INTERVAL_MS).unref()
+  // A bundle downloaded while the game ran installs once it closes.
   game.onChange((running) => {
     if (running || !waitingForGameToClose || status.state !== 'ready') return
     waitingForGameToClose = false

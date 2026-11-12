@@ -56,7 +56,8 @@ position.
 3. Start the tracker **before you log in** to your character, so it picks up your collection.
 
 The overlay draws over **borderless or windowed** mode, not exclusive fullscreen. The app checks
-for updates by itself and asks before installing one.
+for updates by itself. Small updates install on their own while Aion 2 is closed (a quick restart
+that keeps your session); a full installer waits until you choose **Restart to install**.
 
 ## Build from source
 
