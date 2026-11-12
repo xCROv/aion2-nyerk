@@ -72,7 +72,24 @@ def load(path: Path = STORE) -> dict:
     except FileNotFoundError:
         return {"pets": {}}
     drop_non_pets(data)
+    key_by_server(data)
     return data
+
+
+def character_key(name: str, server: int) -> str:
+    """How `characters` names one: a name can be taken on several servers (the Task List addon keys
+    its characters the same way)."""
+    return f"{server}:{name}"
+
+
+def key_by_server(data: dict) -> None:
+    """Characters saved by name alone, before servers were told apart, put under their key."""
+    chars = data.get("characters", {})
+    for name in [n for n, c in chars.items() if ":" not in n and c.get("server") is not None]:
+        key = character_key(name, chars[name]["server"])
+        chars[key] = {"name": name, **chars.pop(name)}
+        if data.get("current") == name:
+            data["current"] = key
 
 
 def drop_non_pets(data: dict) -> int:
@@ -497,7 +514,7 @@ class Tracker:
         you were, until the next zone load says otherwise."""
         with self.lock:
             for name, counts in sessions.items():
-                session = self.sessions.setdefault(name or None, collections.Counter())
+                session = self.sessions.setdefault(self._session_key(name), collections.Counter())
                 session.clear()
                 session.update({int(pid): int(n) for pid, n in counts.items() if int(n) > 0})
             self.session = self.sessions.setdefault(self.data.get("current"), collections.Counter())
@@ -507,6 +524,15 @@ class Tracker:
                 if isinstance(position, list) and len(position) == 2:
                     self.position = (float(position[0]), float(position[1]))
                 self.nearby_dirty = True
+
+    def _session_key(self, saved: str) -> str | None:
+        """Whose a saved session is: a character's key, or a character's name alone as sessions were
+        saved before characters were keyed by server."""
+        chars = self.data.get("characters", {})
+        if not saved or saved in chars:
+            return saved or None
+        named = [key for key, c in chars.items() if c.get("name") == saved]
+        return named[0] if len(named) == 1 else saved
 
     def set_souls(self, pid: int, souls: int) -> dict:
         with self.lock:
@@ -529,9 +555,9 @@ class Tracker:
 
     def character(self) -> dict | None:
         """The character playing (the one the collection is), or None before one was seen."""
-        name = self.data.get("current")
-        entry = self.data.get("characters", {}).get(name, {})
-        return {"name": name, "server": entry.get("server"), "guild": entry.get("guild")} if name else None
+        key = self.data.get("current")
+        entry = self.data.get("characters", {}).get(key, {})
+        return {"name": entry.get("name", key), "server": entry.get("server"), "guild": entry.get("guild")} if key else None
 
     def _character(self, ts: float, who: P.Character) -> None:
         """Pet levels are per character: each has its own collection (souls, levels, crystals),
@@ -539,11 +565,8 @@ class Tracker:
         drops which pet (the votes) is the same for all, and goes along to the one switched to."""
         chars = self.data.setdefault("characters", {})
         old = self.data.get("current")
-        if who.name == old:
-            entry = chars.setdefault(old, {})
-            if who.server is not None and entry.get("server") != who.server:
-                entry["server"] = who.server
-                self._save()
+        key = character_key(who.name, who.server)
+        if key == old:
             if who.guild is not None:
                 self._my_legion(who.guild)
             return
@@ -554,19 +577,20 @@ class Tracker:
                 _, before, resync = self.before_sync
                 self.data["pets"] = before
             chars.setdefault(old, {})["pets"] = self.data["pets"]
-            entry = chars.setdefault(who.name, {})
+            entry = chars.setdefault(key, {})
             pets = entry.pop("pets", {})
             _merge_votes(self.data["pets"], pets)
             self.data["pets"] = pets
         # else: the first character seen takes the collection saved before characters were told apart
         # (a sync just before is this character's own, already in it).
-        entry = chars.setdefault(who.name, {})
+        entry = chars.setdefault(key, {})
+        entry["name"] = who.name
         if who.server is not None:
             entry["server"] = who.server
         if who.guild is not None:
             entry["guild"] = who.guild
-        self.data["current"] = who.name
-        self.session = self.sessions.setdefault(who.name, collections.Counter())
+        self.data["current"] = key
+        self.session = self.sessions.setdefault(key, collections.Counter())
         self.last_soul.clear()
         self.crystal_run.clear()
         self._save()
@@ -596,10 +620,10 @@ class Tracker:
             return
         self.pvp_seen = {k: t for k, t in self.pvp_seen.items() if ts - t < 60}
         self.pvp_seen[key] = ts
-        me = self.data.get("current")
+        me = (self.character() or {}).get("name")
         if me is not None and credit.name == me and credit.guild is not None:
             self._my_legion(credit.guild)  # your own kill names your legion
-        mine = self.data.get("characters", {}).get(me, {}) if me else {}
+        mine = self.character() or {}  # your legion, as your own kill may just have named it
         my_server, my_guild = mine.get("server"), mine.get("guild")
         died = credit.victim == self.self_entity and self.self_entity is not None
         victim = self.players.get(credit.victim)
