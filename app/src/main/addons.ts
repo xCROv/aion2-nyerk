@@ -43,6 +43,7 @@ import {
 import type { EventChannel } from '../shared/ipc.ts'
 import { isAlarmSound } from '../shared/timers.ts'
 import { SDK_CSS, SDK_JS } from './addonSdk.ts'
+import { writeFileAtomic } from './atomicWrite.ts'
 import { broadcast, tapBroadcast } from './broadcast.ts'
 import { settings } from './settings.ts'
 import { timers } from './timers.ts'
@@ -364,7 +365,7 @@ function saveStorage(id: string, data: Record<string, unknown>): void {
   const text = JSON.stringify(data)
   if (text.length > MAX_STORAGE_BYTES) throw new Error('its storage is full (1 MB)')
   mkdirSync(dataFolder(id), { recursive: true })
-  writeFileSync(join(dataFolder(id), 'storage.json'), text)
+  writeFileAtomic(join(dataFolder(id), 'storage.json'), text)
   storage.set(id, data)
 }
 

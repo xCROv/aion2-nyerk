@@ -14,8 +14,9 @@
  * outlives the app, and each server has its own bosses).
  */
 import { app } from 'electron'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeFileAtomic } from './atomicWrite.ts'
 import { broadcast } from './broadcast.ts'
 import { featureOn } from './builtins.ts'
 import { game } from './game.ts'
@@ -58,7 +59,7 @@ function load(): void {
 
 function save(): void {
   try {
-    writeFileSync(file(), JSON.stringify({ server, bosses }))
+    writeFileAtomic(file(), JSON.stringify({ server, bosses }))
   } catch (err) {
     log(`field bosses: not saved: ${String(err)}`)
   }

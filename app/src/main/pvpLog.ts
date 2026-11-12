@@ -5,8 +5,9 @@
  * only when they open or it is cleared (`tracker:pvp`).
  */
 import { app } from 'electron'
-import { readFileSync, writeFile, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeFileAtomic, writeFileAtomicAsync } from './atomicWrite.ts'
 import { broadcast } from './broadcast.ts'
 import type { PvpKill } from '../shared/tracker.ts'
 
@@ -34,7 +35,7 @@ function save(): void {
   if (saveTimer) return
   saveTimer = setTimeout(() => {
     saveTimer = null
-    writeFile(file(), JSON.stringify(list()), () => {})
+    writeFileAtomicAsync(file(), JSON.stringify(list())).catch(() => {})
   }, SAVE_AFTER_MS)
 }
 
@@ -53,7 +54,7 @@ export const pvpLog = {
     clearTimeout(saveTimer)
     saveTimer = null
     try {
-      writeFileSync(file(), JSON.stringify(list()))
+      writeFileAtomic(file(), JSON.stringify(list()))
     } catch {
       // a full disk or a locked file: the last save stands
     }
