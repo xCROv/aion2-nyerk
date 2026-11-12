@@ -84,13 +84,14 @@ Nyerk itself sends data only to nyerk.app:
 
 - **Your IP address**, which every connection carries, for the field boss timers and update checks.
 - **The app's version**, which every request names.
-- **A machine identifier** for the crowd-sourced field boss timers: a salted hash of your Windows
-  machine id, made on your PC, so the id itself never leaves it.
+- **A machine identifier** for the crowd-sourced field boss timers and the update checks (the
+  server's ban list keys on it): a salted hash of your Windows machine id, made on your PC, so the
+  id itself never leaves it.
 - **Your game server and zone ids, and the field boss times your map shows**, for the
   crowd-sourced timers.
 
-Turn off **Share field boss timers** in the app's Timers tab to stop sending the machine identifier
-and the timers; the app then uses only your own map. Update checks never carry either.
+Turn off **Share field boss timers** in the app's Timers tab to stop sending the timers; the app
+then uses only your own map. Update checks still carry the machine identifier, never the timers.
 
 Nothing else from the game is sent: not your character's name, position or account.
 
