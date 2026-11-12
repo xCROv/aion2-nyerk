@@ -279,6 +279,7 @@ class Tracker:
             self.silenced.clear()
             self.players.clear()
             self.legions.clear()
+            self.self_votes.clear()  # entity ids change between zones, yours too
             self.nearby_dirty = True
             self._zoned = True
         elif t := P.parse_self_teleport(pkt):
@@ -299,8 +300,7 @@ class Tracker:
             self.players[player.entity] = player
         if (legion := P.parse_legion(pkt)) is not None:
             self.legions[legion.entity] = legion.name
-            me = self.self_entity if self.self_entity is not None else self.self_id()
-            if legion.entity == me:
+            if legion.entity == self.self_id():
                 self._my_legion(legion.name)
         if (credit := P.parse_kill_credit(pkt)) is not None:
             me = self.character()
@@ -424,10 +424,13 @@ class Tracker:
         return bool(pet) and (pet.get("level") or 0) >= MAX_LEVEL
 
     def _is_me(self, entity: int) -> bool:
-        """You: the entity your zone entry named, or the one credited with the kills before your souls."""
-        return entity in (self.self_entity, self.self_id()) and entity is not None
+        return entity is not None and entity == self.self_id()
 
     def self_id(self) -> int | None:
+        """You: the entity your zone entry named, else the one credited with the kills before your
+        souls in this zone."""
+        if self.self_entity is not None:
+            return self.self_entity
         best = self.self_votes.most_common(1)
         return best[0][0] if best else None
 
