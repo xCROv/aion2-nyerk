@@ -28,6 +28,11 @@ from . import protocol
 LOCK_HITS = 12  # signature-bearing packets ...
 LOCK_WINDOW_S = 3.0  # ... within this long, from one flow, lock onto it
 HOLD_LIMIT = 4 * 1024 * 1024  # bytes kept per flow while waiting for the lock
+# Bytes kept in all, and flows kept track of: past either, flows that never looked like the game
+# make way, the oldest first.
+HOLD_TOTAL = 8 * HOLD_LIMIT
+HOLD_FLOWS = 1024
+TCP_SYN, TCP_RST = 0x02, 0x04
 # Until the lock, how often the log says what each adapter is seeing; once locked, how long the
 # stream goes without a packet read before the log says what the locked port sent.
 REPORT_S = 30.0
@@ -71,6 +76,7 @@ class Reassembler:
     def feed(self, seq: int, data: bytes, ts: float | None = None) -> list[bytes]:
         if self.next_seq is None:
             self.next_seq = seq
+        front = self.next_seq
         delta = (seq - self.next_seq) & 0xFFFFFFFF
         if delta == 0:
             self._append(data)
@@ -94,8 +100,12 @@ class Reassembler:
         # draining on an exact arrival stalled the stream for good after a resync, whose first
         # held segment had already arrived.)
         self._drain()
-        # A gap still open after a resync (another segment missing further on) waits from now.
-        self.pending_since = (ts if self.pending_since is None else self.pending_since) if self.pending else None
+        # A gap still open once the stream moved on (the one before it filled, or was given up on)
+        # waits from now, not from when the one before opened.
+        if not self.pending:
+            self.pending_since = None
+        elif self.pending_since is None or self.next_seq != front:
+            self.pending_since = ts
         if not self.tunnel and protocol.is_tunnel(self.buf):
             self.tunnel = True
             print("[capture] the game stream comes through a tunnel (a ping reducer?): unwrapping it", file=sys.stderr)
@@ -160,6 +170,8 @@ class GameStream:
         self.held: dict[tuple[str, int, str, int], list[tuple]] = {}
         self.held_bytes: dict[tuple[str, int, str, int], int] = {}
         self.first_seen: dict[tuple[str, int, str, int], float] = {}
+        self.holding = 0  # bytes held, all flows told
+        self.swept = float("-inf")  # when the flows held were last looked over
         self.last_sig: float | None = None  # the locked port's last terminator
         # Since the last quiet_report: what came from the locked port, and what was read out of it.
         self.seen = self.seen_bytes = self.empty = self.decoded = 0
@@ -195,7 +207,16 @@ class GameStream:
         self.seen = self.seen_bytes = self.empty = self.decoded = 0
         return line
 
-    def segment(self, ts: float, src: str, sport: int, dst: str, dport: int, seq: int, data: bytes) -> None:
+    def segment(self, ts: float, src: str, sport: int, dst: str, dport: int, seq: int, data: bytes,
+                flags: int = 0) -> None:
+        if flags & (TCP_SYN | TCP_RST):
+            # A connection starting or ending: its sequence numbers start afresh, even on the same ports.
+            for k in ((src, sport, dst, dport), (dst, dport, src, sport)):
+                self.flows.pop(k, None)
+                self.seq_end.pop(k, None)
+        if self.port is not None and ts - self.swept >= 1.0:
+            self.swept = ts
+            self._sweep(ts)
         if self.port is not None and sport == self.port:
             self.seen += 1
             self.seen_bytes += len(data)
@@ -215,7 +236,7 @@ class GameStream:
             self._feed(key, ts, seq, data)
             return
         # Not (or no longer) the game's port: held, in case it turns out to be.
-        self._hold(key, (ts, seq, data), signed)
+        self._hold(key, (ts, seq, data))
         if not signed:
             return
         times = [t for t in self.hits.get((src, sport), []) if ts - t <= LOCK_WINDOW_S] + [ts]
@@ -237,27 +258,66 @@ class GameStream:
         self.held.clear()
         self.held_bytes.clear()
         self.first_seen.clear()
+        self.holding = 0
         for k, segs in held.items():
             for t, s, d in segs:
                 self._feed(k, t, s, d)
         # the segment that completed the lock was the last one held
         self.sent = self.got = self.gaps = self.lost = 0  # the health counts start with the lock
 
-    def _hold(self, key, seg, signed: bool) -> None:
+    def _hold(self, key, seg) -> None:
         if key not in self.held:
+            if len(self.held) >= HOLD_FLOWS and (oldest := next(self._not_the_game(), None)) is not None:
+                self._forget(oldest)
             if seg[2][:3] in (b"\x17\x03\x03", b"\x16\x03\x01", b"\x16\x03\x03"):
                 self.held_bytes[key] = HOLD_LIMIT  # TLS: never the game, never held
             self.held[key] = []
             self.first_seen[key] = seg[0]
-        if (self.port is not None and not signed and not self.hits.get((key[0], key[1]))
-                and seg[0] - self.first_seen[key] > HOLD_YOUNG_S):
-            # Locked, and an old flow that has never looked like the game: let its bytes go.
-            self.held[key] = []
-            self.held_bytes[key] = HOLD_LIMIT
-        if self.held_bytes.get(key, 0) + len(seg[2]) > HOLD_LIMIT:
+        size = len(seg[2])
+        if self.held_bytes.get(key, 0) + size > HOLD_LIMIT:
+            return
+        if self.holding + size > HOLD_TOTAL and not self._room(size, key):
             return
         self.held[key].append(seg)
-        self.held_bytes[key] = self.held_bytes.get(key, 0) + len(seg[2])
+        self.held_bytes[key] = self.held_bytes.get(key, 0) + size
+        self.holding += size
+
+    def _not_the_game(self) -> Iterator[tuple[str, int, str, int]]:
+        """The flows held whose server never sent the terminator, the oldest first."""
+        return (k for k in list(self.held) if not self.hits.get((k[0], k[1])))
+
+    def _sweep(self, ts: float) -> None:
+        """Locked: the flows past HOLD_YOUNG_S that never looked like the game let go, whether or not
+        they send again."""
+        for key in self._not_the_game():
+            if self.held[key] and ts - self.first_seen[key] > HOLD_YOUNG_S:
+                self._let_go(key)
+
+    def _room(self, size: int, key) -> bool:
+        """Room for `size` bytes more within HOLD_TOTAL, made by freeing what the flows that never
+        looked like the game held, the oldest first (`key` aside)."""
+        for k in self._not_the_game():
+            if self.holding + size <= HOLD_TOTAL:
+                break
+            if k != key and self.held[k]:
+                self._free(k)
+        return self.holding + size <= HOLD_TOTAL
+
+    def _free(self, key) -> None:
+        """What `key` held let go of; it is held again from its next segment."""
+        self.holding -= sum(len(d) for _, _, d in self.held[key])
+        self.held[key] = []
+        self.held_bytes[key] = 0
+
+    def _let_go(self, key) -> None:
+        """What `key` held let go of, and nothing more held from it."""
+        self._free(key)
+        self.held_bytes[key] = HOLD_LIMIT
+
+    def _forget(self, key) -> None:
+        self.holding -= sum(len(d) for _, _, d in self.held.pop(key))
+        self.held_bytes.pop(key, None)
+        self.first_seen.pop(key, None)
 
     def _feed(self, key, ts: float, seq: int, data: bytes) -> None:
         if key not in self.flows:
@@ -288,7 +348,7 @@ def _segments(packets) -> Iterator[tuple]:
             # its whole payload is stream bytes.
             size = ip.len - ip.ihl * 4 - t.dataofs * 4
             data = bytes(t.payload) if ip.len == 0 else bytes(t.payload)[: max(size, 0)]
-            yield float(p.time), ip.src, t.sport, ip.dst, t.dport, t.seq, data
+            yield float(p.time), ip.src, t.sport, ip.dst, t.dport, t.seq, data, int(t.flags)
 
 
 def _raw_segment(link: str, raw: bytes, ts: float) -> tuple | None:
@@ -318,7 +378,7 @@ def _raw_segment(link: str, raw: bytes, ts: float) -> tuple | None:
     # Trimmed to the IP length (short frames carry Ethernet padding), except a length of 0: a
     # segment merged past 64 KB, all of it stream bytes (as _segments).
     data = raw[start:] if total == 0 else raw[start:off + total]
-    return ts, socket.inet_ntoa(raw[off + 12:off + 16]), sport, socket.inet_ntoa(raw[off + 16:off + 20]), dport, seq, data
+    return ts, socket.inet_ntoa(raw[off + 12:off + 16]), sport, socket.inet_ntoa(raw[off + 16:off + 20]), dport, seq, data, raw[t + 13]
 
 
 def replay(path: str, stream: GameStream, speed: float | None = None,
