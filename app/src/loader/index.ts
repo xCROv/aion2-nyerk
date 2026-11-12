@@ -9,10 +9,12 @@
  *
  * In order:
  * 1. name the app, because userData hangs off the name (main/index.ts names it again);
- * 2. read `<userData>/bundles/state.json` and choose what to run;
- * 3. count the attempt **before** making it, so a bundle that cannot start is counted out rather
+ * 2. take the single-instance lock: a second launch only opens the first one's panel, so it quits
+ *    here, before it could count as an attempt;
+ * 3. read `<userData>/bundles/state.json` and choose what to run;
+ * 4. count the attempt **before** making it, so a bundle that cannot start is counted out rather
  *    than retried forever (the app clears the count once it has started);
- * 4. require the bundle's main/index.js, which is the app as before.
+ * 5. require the bundle's main/index.js, which is the app as before.
  *
  * `--builtin-bundle` or NYERK_BUILTIN=1 pins the install to its built-in app. A development run
  * (not packaged) always runs the code it was started from.
@@ -135,4 +137,5 @@ function boot(): void {
 }
 
 app.setName(DISPLAY_NAME)
-boot()
+if (app.requestSingleInstanceLock()) boot()
+else app.quit()
