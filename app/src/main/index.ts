@@ -34,6 +34,7 @@ app.setAppUserModelId('com.xcrov.aion2-drop-tracker')
 registerAddonScheme()
 
 // One instance: a second launch opens the first one's panel instead.
+// The loader takes the lock first (this is then true at once); older shells leave it to here.
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
